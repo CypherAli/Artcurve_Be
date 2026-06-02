@@ -26,10 +26,24 @@ export interface PriceUpdatedEvent {
 export class RedisService {
   private readonly logger = new Logger(RedisService.name);
 
+  // ── In-memory fallback when Redis is unavailable ──────────────────────────
+  // Nonce: wallet → { nonce, expiresAt }
+  private readonly nonceStore = new Map<string, { nonce: string; expiresAt: number }>()
+  // JWT blacklist: jti → expiresAt (unix ms)
+  private readonly jwtBlacklist = new Map<string, number>()
+  // Is Redis actually reachable?
+  private redisReady = false
+
   constructor(
     @Inject(REDIS_CLIENT)     private readonly redis: Redis,
     @Inject(REDIS_SUBSCRIBER) private readonly sub: Redis,
-  ) {}
+  ) {
+    // Track Redis readiness so we can fall back to in-memory gracefully
+    this.redis.on('ready',        () => { this.redisReady = true })
+    this.redis.on('error',        () => { this.redisReady = false })
+    this.redis.on('close',        () => { this.redisReady = false })
+    this.redis.on('reconnecting', () => { this.redisReady = false })
+  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // AUTH — Nonce (thay the PostgreSQL query, nhanh hon 100x)
@@ -37,12 +51,25 @@ export class RedisService {
 
   /** Luu nonce voi TTL 5 phut */
   async setNonce(wallet: string, nonce: string): Promise<void> {
-    await this.redis.setex(REDIS_KEYS.nonce(wallet), TTL.NONCE, nonce);
+    if (this.redisReady) {
+      await this.redis.setex(REDIS_KEYS.nonce(wallet), TTL.NONCE, nonce)
+    } else {
+      // In-memory fallback
+      this.nonceStore.set(wallet, { nonce, expiresAt: Date.now() + TTL.NONCE * 1000 })
+      this.logger.warn('[Auth] Redis unavailable — nonce stored in-memory (dev only)')
+    }
   }
 
   /** Doc nonce (tra ve null neu het han hoac khong ton tai) */
   async getNonce(wallet: string): Promise<string | null> {
-    return this.redis.get(REDIS_KEYS.nonce(wallet));
+    if (this.redisReady) {
+      return this.redis.get(REDIS_KEYS.nonce(wallet))
+    }
+    // In-memory fallback
+    const entry = this.nonceStore.get(wallet)
+    if (!entry) return null
+    if (Date.now() > entry.expiresAt) { this.nonceStore.delete(wallet); return null }
+    return entry.nonce
   }
 
   /**
@@ -50,10 +77,15 @@ export class RedisService {
    * Chong replay attack: sau khi verify, nonce bien mat khoi Redis luc tuc
    */
   async consumeNonce(wallet: string): Promise<string | null> {
-    // GETDEL la atomic command cua Redis 6.2+
-    // Fallback manual GET+DEL cho Redis cu hon
-    const nonce = await this.redis.getdel(REDIS_KEYS.nonce(wallet));
-    return nonce;
+    if (this.redisReady) {
+      return this.redis.getdel(REDIS_KEYS.nonce(wallet))
+    }
+    // In-memory fallback
+    const entry = this.nonceStore.get(wallet)
+    if (!entry) return null
+    this.nonceStore.delete(wallet)
+    if (Date.now() > entry.expiresAt) return null
+    return entry.nonce
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -65,14 +97,25 @@ export class RedisService {
    * TTL = thoi gian con lai cua token (khong waste memory cho token het han)
    */
   async blacklistJwt(jti: string, remainingTtlSeconds: number): Promise<void> {
-    if (remainingTtlSeconds <= 0) return; // Token da het han, khong can blacklist
-    await this.redis.setex(REDIS_KEYS.jwtBlacklist(jti), remainingTtlSeconds, '1');
+    if (remainingTtlSeconds <= 0) return
+    if (this.redisReady) {
+      await this.redis.setex(REDIS_KEYS.jwtBlacklist(jti), remainingTtlSeconds, '1')
+    } else {
+      this.jwtBlacklist.set(jti, Date.now() + remainingTtlSeconds * 1000)
+    }
   }
 
   /** Kiem tra JWT co bi blacklist khong — goi trong JwtAuthGuard */
   async isJwtBlacklisted(jti: string): Promise<boolean> {
-    const exists = await this.redis.exists(REDIS_KEYS.jwtBlacklist(jti));
-    return exists === 1;
+    if (this.redisReady) {
+      const exists = await this.redis.exists(REDIS_KEYS.jwtBlacklist(jti))
+      return exists === 1
+    }
+    // In-memory fallback
+    const exp = this.jwtBlacklist.get(jti)
+    if (!exp) return false
+    if (Date.now() > exp) { this.jwtBlacklist.delete(jti); return false }
+    return true
   }
 
   // ════════════════════════════════════════════════════════════════════════════
