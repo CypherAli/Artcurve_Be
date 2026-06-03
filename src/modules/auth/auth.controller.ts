@@ -1,17 +1,22 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   Headers,
+  Query,
+  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import {
   NonceRequestDto,
@@ -24,7 +29,10 @@ import { Public, CurrentUser } from './decorators';
 @ApiTags('Auth — Web3 Sign-In')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: ConfigService,
+  ) {}
 
   // ── POST /auth/nonce ───────────────────────────────────────────────────────
 
@@ -63,6 +71,40 @@ export class AuthController {
       dto.signature,
       dto.message,   // raw SIWE message string — cần để re-parse + verify domain
     );
+  }
+
+  // ── GET /auth/github ──────────────────────────────────────────────────────
+
+  @Get('github')
+  @Public()
+  @ApiOperation({ summary: 'GitHub OAuth — redirect to GitHub' })
+  githubRedirect(@Res() res: Response) {
+    const clientId   = this.config.get('GITHUB_CLIENT_ID');
+    const backendUrl = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+    const callback   = `${backendUrl}/api/v1/auth/github/callback`;
+    const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callback)}&scope=read:user,user:email`;
+    res.redirect(url);
+  }
+
+  // ── GET /auth/github/callback ──────────────────────────────────────────────
+
+  @Get('github/callback')
+  @Public()
+  @ApiOperation({ summary: 'GitHub OAuth — callback & issue JWT' })
+  async githubCallback(@Query('code') code: string, @Res() res: Response) {
+    try {
+      const result      = await this.authService.githubLogin(code);
+      const frontendUrl = this.config.get('FRONTEND_URL', 'https://artcurve-fe.vercel.app');
+      const params = new URLSearchParams({
+        token:   result.access_token,
+        address: result.user.wallet_address,
+        name:    result.user.username ?? '',
+      });
+      res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    } catch {
+      const frontendUrl = this.config.get('FRONTEND_URL', 'https://artcurve-fe.vercel.app');
+      res.redirect(`${frontendUrl}/?auth_error=github_failed`);
+    }
   }
 
   // ── POST /auth/logout ──────────────────────────────────────────────────────

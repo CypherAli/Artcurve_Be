@@ -222,6 +222,69 @@ export class AuthService {
     };
   }
 
+  // ── githubLogin ───────────────────────────────────────────────────────────
+  async githubLogin(code: string): Promise<{
+    access_token: string;
+    expires_in:   number;
+    user: { id: string; wallet_address: string; username: string | null; role: string; is_verified: boolean };
+  }> {
+    // 1. Exchange code → GitHub access token
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        client_id:     this.config.get('GITHUB_CLIENT_ID'),
+        client_secret: this.config.get('GITHUB_CLIENT_SECRET'),
+        code,
+      }),
+    });
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenData.access_token) {
+      throw new UnauthorizedException('GitHub OAuth thất bại — không lấy được access token');
+    }
+
+    // 2. Lấy profile GitHub
+    const profileRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'ArtCurve' },
+    });
+    const profile = await profileRes.json() as any;
+
+    // 3. Derive wallet address từ GitHub ID (deterministic, 42 chars)
+    const walletAddress = `0x${Number(profile.id).toString(16).padStart(40, '0')}`;
+
+    // 4. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url, email)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+           email      = COALESCE(EXCLUDED.email,      users.email)`,
+      [walletAddress, profile.login ?? null, profile.avatar_url ?? null, profile.email ?? null],
+    );
+
+    const users = await this.dataSource.query(
+      `SELECT id, wallet_address, username, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = users[0];
+
+    // 5. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+
+    this.logger.log(`[GitHub] JWT issued: github=${profile.login}, wallet=${walletAddress}`);
+    return {
+      access_token,
+      expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
   // ── logout ─────────────────────────────────────────────────────────────────
   /**
    * Thu hồi JWT — ghi jti vào Redis blacklist.
