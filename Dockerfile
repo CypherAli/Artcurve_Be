@@ -1,37 +1,20 @@
-# ── Stage 1: Build ────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies first (cache layer)
+# Install all deps (including devDeps for nest CLI)
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+RUN npm install --legacy-peer-deps
 
-# Copy source and build
+# Copy source
 COPY . .
-RUN npm run build
 
-# ── Stage 2: Production ───────────────────────────────────────────
-FROM node:20-alpine AS production
+# Build TypeScript
+RUN ./node_modules/.bin/nest build
 
-WORKDIR /app
-
-ENV NODE_ENV=production
-
-# Only copy production deps
-COPY package*.json ./
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
-
-# Copy built output
-COPY --from=builder /app/dist ./dist
-
-# Non-root user for security
-RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
-USER nestjs
+# Verify dist exists
+RUN ls -la dist/ && echo "Build OK"
 
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3001/api/v1/health/ping || exit 1
-
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/main"]
