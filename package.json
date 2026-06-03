@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "ARTCURVE — Fractionalized Art Trading DApp Backend (NestJS + TypeORM + PostgreSQL)",
   "scripts": {
-    "build": "nest build",
+    "build": "tsc -p tsconfig.json --skipLibCheck",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
