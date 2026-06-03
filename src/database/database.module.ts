@@ -14,15 +14,25 @@ import { ModerationLog } from '../modules/artworks/entities/moderation-log.entit
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get<string>('DB_HOST', 'localhost'),
-        port: config.get<number>('DB_PORT', 5432),
-        username: config.get<string>('DB_USERNAME', 'postgres'),
-        password: config.get<string>('DB_PASSWORD', 'postgres'),
-        database: config.get<string>('DB_NAME', 'artcurve_db'),
+      useFactory: (config: ConfigService) => {
+        const databaseUrl = config.get<string>('DATABASE_URL');
+        const isProduction = config.get('NODE_ENV') === 'production';
 
-        ssl: config.get('NODE_ENV') === 'production'
+        const baseConfig = databaseUrl
+          ? { url: databaseUrl }
+          : {
+              host:     config.get<string>('DB_HOST',     'localhost'),
+              port:     config.get<number>('DB_PORT',     5432),
+              username: config.get<string>('DB_USERNAME', 'postgres'),
+              password: config.get<string>('DB_PASSWORD', 'postgres'),
+              database: config.get<string>('DB_NAME',     'artcurve_db'),
+            };
+
+        return {
+        type: 'postgres' as const,
+        ...baseConfig,
+
+        ssl: isProduction
           ? { rejectUnauthorized: false }
           : false,
 
@@ -48,10 +58,9 @@ import { ModerationLog } from '../modules/artworks/entities/moderation-log.entit
           statement_timeout: 30000,
         },
 
-        logging: config.get('NODE_ENV') === 'development'
-          ? ['query', 'error']
-          : ['error'],
-      }),
+        logging: isProduction ? ['error'] : ['query', 'error'],
+        };
+      },
     }),
   ],
   exports: [TypeOrmModule],
