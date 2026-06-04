@@ -99,6 +99,7 @@ export class AuthController {
         token:   result.access_token,
         address: result.user.wallet_address,
         name:    result.user.username ?? '',
+        avatar:  result.user.avatar_url ?? '',
       });
       res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
     } catch {

@@ -226,7 +226,7 @@ export class AuthService {
   async githubLogin(code: string): Promise<{
     access_token: string;
     expires_in:   number;
-    user: { id: string; wallet_address: string; username: string | null; role: string; is_verified: boolean };
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
   }> {
     // 1. Exchange code → GitHub access token
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
@@ -281,7 +281,7 @@ export class AuthService {
     return {
       access_token,
       expires_in: expiresIn,
-      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, role: user.role, is_verified: user.is_verified },
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
   }
 
