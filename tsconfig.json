@@ -26,5 +26,6 @@
       "ox/*": ["node_modules/ox/_types/*.d.ts"]
     }
   },
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "scripts"]
 }
