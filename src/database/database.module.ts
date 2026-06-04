@@ -47,7 +47,7 @@ import { ModerationLog } from '../modules/artworks/entities/moderation-log.entit
         ],
 
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
-        synchronize: false,
+        synchronize: true, // auto-create tables on first deploy
 
         // Pool: production grade — NestJS microservice có thể spawn nhiều worker
         extra: {
