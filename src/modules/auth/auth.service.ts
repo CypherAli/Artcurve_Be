@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SiweMessage } from 'siwe';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash, randomBytes } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from '../../shared/redis/redis.service';
 
@@ -278,6 +279,107 @@ export class AuthService {
     );
 
     this.logger.log(`[GitHub] JWT issued: github=${profile.login}, wallet=${walletAddress}`);
+    return {
+      access_token,
+      expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // ── twitterAuthUrl ────────────────────────────────────────────────────────
+  /** Generate Twitter OAuth 2.0 URL with PKCE */
+  buildTwitterAuthUrl(callbackUrl: string): { url: string; state: string } {
+    const codeVerifier  = randomBytes(32).toString('base64url');
+    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+    const state         = Buffer.from(JSON.stringify({ cv: codeVerifier })).toString('base64url');
+
+    const url = new URL('https://twitter.com/i/oauth2/authorize');
+    url.searchParams.set('response_type',         'code');
+    url.searchParams.set('client_id',             this.config.get('TWITTER_CLIENT_ID', ''));
+    url.searchParams.set('redirect_uri',          callbackUrl);
+    url.searchParams.set('scope',                 'tweet.read users.read');
+    url.searchParams.set('state',                 state);
+    url.searchParams.set('code_challenge',        codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+
+    return { url: url.toString(), state };
+  }
+
+  // ── twitterLogin ───────────────────────────────────────────────────────────
+  async twitterLogin(code: string, state: string, callbackUrl: string): Promise<{
+    access_token: string;
+    expires_in:   number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    // 1. Decode code_verifier from state
+    let codeVerifier: string;
+    try {
+      const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
+      codeVerifier  = decoded.cv;
+    } catch {
+      throw new UnauthorizedException('Invalid state parameter');
+    }
+
+    const clientId     = this.config.get('TWITTER_CLIENT_ID', '');
+    const clientSecret = this.config.get('TWITTER_CLIENT_SECRET', '');
+
+    // 2. Exchange code for access token
+    const tokenRes = await fetch('https://api.twitter.com/2/oauth2/token', {
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        code,
+        grant_type:    'authorization_code',
+        client_id:     clientId,
+        redirect_uri:  callbackUrl,
+        code_verifier: codeVerifier,
+      }).toString(),
+    });
+
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenData.access_token) {
+      throw new UnauthorizedException(`Twitter OAuth failed: ${tokenData.error_description ?? 'no token'}`);
+    }
+
+    // 3. Get Twitter user profile
+    const profileRes = await fetch('https://api.twitter.com/2/users/me?user.fields=profile_image_url,name,username', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'ArtCurve' },
+    });
+    const profileData = await profileRes.json() as any;
+    const profile     = profileData.data;
+    if (!profile?.id) throw new UnauthorizedException('Cannot fetch Twitter profile');
+
+    // 4. Derive wallet address from Twitter ID
+    const walletAddress = `0x${BigInt(profile.id).toString(16).padStart(40, '0')}`;
+
+    // 5. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url)`,
+      [walletAddress, profile.username ?? null, profile.profile_image_url?.replace('_normal', '') ?? null],
+    );
+
+    const users = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = users[0];
+
+    // 6. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+
+    this.logger.log(`[Twitter] JWT issued: @${profile.username}, wallet=${walletAddress}`);
     return {
       access_token,
       expires_in: expiresIn,

@@ -108,6 +108,46 @@ export class AuthController {
     }
   }
 
+  // ── GET /auth/twitter ─────────────────────────────────────────────────────
+
+  @Get('twitter')
+  @Public()
+  @ApiOperation({ summary: 'Twitter/X OAuth 2.0 — redirect to X' })
+  twitterRedirect(@Res() res: Response) {
+    const backendUrl  = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+    const callbackUrl = `${backendUrl}/api/v1/auth/twitter/callback`;
+    const { url }     = this.authService.buildTwitterAuthUrl(callbackUrl);
+    res.redirect(url);
+  }
+
+  // ── GET /auth/twitter/callback ────────────────────────────────────────────
+
+  @Get('twitter/callback')
+  @Public()
+  @ApiOperation({ summary: 'Twitter/X OAuth 2.0 — callback & issue JWT' })
+  async twitterCallback(
+    @Query('code')  code:  string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = this.config.get('FRONTEND_URL', 'https://artcurve-fe.vercel.app');
+    try {
+      const backendUrl  = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+      const callbackUrl = `${backendUrl}/api/v1/auth/twitter/callback`;
+      const result      = await this.authService.twitterLogin(code, state, callbackUrl);
+      const params = new URLSearchParams({
+        token:   result.access_token,
+        address: result.user.wallet_address,
+        name:    result.user.username ?? '',
+        avatar:  result.user.avatar_url ?? '',
+        provider: 'twitter',
+      });
+      res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    } catch {
+      res.redirect(`${frontendUrl}/?auth_error=twitter_failed`);
+    }
+  }
+
   // ── POST /auth/logout ──────────────────────────────────────────────────────
 
   @Post('logout')
