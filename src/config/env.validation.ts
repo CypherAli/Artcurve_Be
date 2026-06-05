@@ -35,7 +35,7 @@ export const envValidationSchema = Joi.object({
 
   // ── [3] CORS ───────────────────────────────────────────────────────────────
   // Comma-separated list of allowed origins, e.g. "https://artcurve.io,https://www.artcurve.io"
-  CORS_ORIGINS: Joi.string().default('http://localhost:3001'),
+  CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
 
   // ── [4] PostgreSQL ─────────────────────────────────────────────────────────
   DATABASE_URL: Joi.string().uri({ scheme: ['postgresql', 'postgres'] }).required(),

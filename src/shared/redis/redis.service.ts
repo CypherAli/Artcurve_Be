@@ -12,12 +12,16 @@ export interface ArtworkPriceCache {
 }
 
 export interface PriceUpdatedEvent {
-  artwork_id: string;
-  current_price: string;
+  artwork_id:     string;
+  current_price:  string;
   current_supply: string;
-  volume_24h: string;
-  tx_hash: string;
-  timestamp: number;
+  volume_24h:     string;
+  tx_hash:        string;
+  timestamp:      number;
+  // Trade metadata — dùng bởi EventsGateway để broadcast trade_updated
+  is_buy?:      boolean;
+  user_wallet?: string;
+  share_amount?: string;
 }
 
 // ── RedisService ──────────────────────────────────────────────────────────────

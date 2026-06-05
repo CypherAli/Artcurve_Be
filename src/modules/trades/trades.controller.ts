@@ -14,9 +14,9 @@ import {
   ApiParam,
   ApiQuery,
   ApiResponse,
-  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { TradesService } from './trades.service';
+import { Public } from '../auth/decorators';
 import type { OhlcvTimeframe } from '../../shared/clickhouse/clickhouse-infra.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,14 +35,32 @@ import type { OhlcvTimeframe } from '../../shared/clickhouse/clickhouse-infra.se
 // ─────────────────────────────────────────────────────────────────────────────
 
 @ApiTags('Trades — History & Chart Data')
-@ApiBearerAuth('JWT-auth')
 @Controller('trades')
 export class TradesController {
   constructor(private readonly tradesService: TradesService) {}
 
+  // ── GET /trades/leaderboard ─── PHẢI đặt TRƯỚC /:artworkId/* ─────────────
+  // Express match route theo thứ tự. Nếu đặt sau, "leaderboard" bị nuốt vào :artworkId.
+
+  @Get('leaderboard')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Top artworks theo volume 7 ngày',
+    description: 'Query Materialized View volume_daily. Public — không cần auth.',
+  })
+  @ApiQuery({ name: 'limit', type: Number, required: false })
+  @ApiResponse({ status: 200, description: 'Mảng { artwork_id, volume_eth, trade_count } sorted DESC' })
+  async getLeaderboard(
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.tradesService.getTopByVolume(Math.min(limit, 100));
+  }
+
   // ── GET /trades/:artworkId/ohlcv ──────────────────────────────────────────
 
   @Get(':artworkId/ohlcv')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Lấy OHLCV candles cho candlestick chart',
@@ -75,6 +93,7 @@ export class TradesController {
   // ── GET /trades/:artworkId/history ────────────────────────────────────────
 
   @Get(':artworkId/history')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Lịch sử giao dịch raw của 1 artwork',
@@ -98,6 +117,7 @@ export class TradesController {
   // ── GET /trades/:artworkId/volume ─────────────────────────────────────────
 
   @Get(':artworkId/volume')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Volume 24h của 1 artwork (fallback khi Redis cache miss)',
@@ -109,22 +129,4 @@ export class TradesController {
     return { volume_eth: volume };
   }
 
-  // ── GET /trades/leaderboard ───────────────────────────────────────────────
-
-  @Get('leaderboard')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Top artworks theo volume 7 ngày',
-    description:
-      'Dữ liệu cho leaderboard trang chủ. ' +
-      'Query Materialized View volume_daily. ' +
-      'TTL cache Redis: 5 phút (TODO: thêm Redis caching layer).',
-  })
-  @ApiQuery({ name: 'limit', type: Number, required: false, description: 'Số artworks (default 20)' })
-  @ApiResponse({ status: 200, description: 'Mảng { artwork_id, volume_eth, trade_count } sorted DESC' })
-  async getLeaderboard(
-    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
-  ) {
-    return this.tradesService.getTopByVolume(Math.min(limit, 100));
-  }
 }

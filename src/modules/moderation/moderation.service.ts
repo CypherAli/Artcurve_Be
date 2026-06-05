@@ -37,11 +37,13 @@ export class ModerationService {
 
     if (apiKey && imageUrl) {
       try {
-        // OpenAI Moderation API
+        // OpenAI Moderation API — input phải là text mô tả, không phải URL
+        // Dùng imageUrl làm text mô tả (nếu là IPFS URI thì gửi URI string)
+        // Để check image thật cần Vision API; moderation API chỉ nhận text
         const response = await firstValueFrom(
           this.httpService.post(
             'https://api.openai.com/v1/moderations',
-            { input: imageUrl },
+            { input: `Artwork image: ${imageUrl}` },
             { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } },
           ),
         )
@@ -72,12 +74,17 @@ export class ModerationService {
       ai_confidence_score:  (score * 100).toFixed(2),
     })
 
-    // Update artwork status
+    // State machine: DRAFT → AI_MODERATING (khi submit) → ACTIVE (khi pass) / DRAFT (khi reject)
+    // moderateArtwork được gọi SAU KHI artwork đã ở trạng thái AI_MODERATING.
+    // Nếu pass → ACTIVE (chờ deploy contract).
+    // Nếu reject → DRAFT (artist sửa lại).
+    // Nếu manual_review → giữ nguyên AI_MODERATING (admin xử lý thủ công).
     if (result === 'approved') {
-      await this.artworkRepo.update(artworkId, { status: ArtworkStatus.AI_MODERATING })
+      await this.artworkRepo.update(artworkId, { status: ArtworkStatus.ACTIVE })
     } else if (result === 'rejected') {
       await this.artworkRepo.update(artworkId, { status: ArtworkStatus.DRAFT })
     }
+    // manual_review: không đổi status — admin sẽ review thủ công
 
     return result
   }
