@@ -81,9 +81,19 @@ export class TradesService {
     limit  = 50,
     offset = 0,
   ): Promise<TradeHistoryItem[]> {
-    // TODO: delegate to chService.getTradeHistory() sau khi thêm method
     this.logger.debug(`[TradeHistory] artworkId=${artworkId} limit=${limit} offset=${offset}`);
-    return [];  // Placeholder — implement khi cần
+    const rows = await this.chService.getTradeHistory(artworkId, limit, offset);
+    return rows.map(r => ({
+      tx_hash:         r.tx_hash,
+      tx_type:         r.tx_type,
+      user_id:         r.user_id,
+      share_amount:    r.share_amount,
+      eth_amount:      r.eth_amount,
+      price_per_share: r.price_per_share,
+      gas_fee:         r.gas_fee,
+      block_number:    r.block_number,
+      timestamp:       r.timestamp,
+    }));
   }
 
   // ── Volume Stats ───────────────────────────────────────────────────────────

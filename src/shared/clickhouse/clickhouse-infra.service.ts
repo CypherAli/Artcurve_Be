@@ -151,6 +151,43 @@ export class InfraClickHouseService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  TRADE HISTORY
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Lịch sử giao dịch của 1 artwork, sắp xếp mới nhất trước.
+   * Dùng OFFSET pagination — an toàn cho < 1M rows/artwork.
+   */
+  async getTradeHistory(
+    artworkId: string,
+    limit  = 50,
+    offset = 0,
+  ): Promise<TradeRow[]> {
+    const result = await this.ch.query({
+      query: `
+        SELECT
+          artwork_id, tx_hash, user_id, tx_type,
+          toString(share_amount)    AS share_amount,
+          toString(eth_amount)      AS eth_amount,
+          toString(price_per_share) AS price_per_share,
+          toString(gas_fee)         AS gas_fee,
+          block_number,
+          timestamp
+        FROM trades
+        WHERE artwork_id = {artwork_id: UUID}
+        ORDER BY timestamp DESC
+        LIMIT  {limit:  UInt32}
+        OFFSET {offset: UInt32}
+      `,
+      query_params: { artwork_id: artworkId, limit, offset },
+      format: 'JSONEachRow',
+    });
+
+    const rows = await result.json<TradeRow>();
+    return rows;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  WRITE  —  Chỉ Consumer mới được gọi
   // ══════════════════════════════════════════════════════════════════════════
 
