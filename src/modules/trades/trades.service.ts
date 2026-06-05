@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InfraClickHouseService, OhlcvTimeframe, OhlcvCandle } from '../../shared/clickhouse/clickhouse-infra.service';
+import { TransactionRepository } from './repositories/transaction.repository';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TradesService  (src/modules/trades/)
@@ -43,6 +44,7 @@ export class TradesService {
 
   constructor(
     private readonly chService: InfraClickHouseService,
+    private readonly txRepo: TransactionRepository,
   ) {}
 
   // ── OHLCV (Candlestick Chart) ──────────────────────────────────────────────
@@ -111,6 +113,12 @@ export class TradesService {
    */
   async getTopByVolume(limit = 20): Promise<VolumeStatsResult[]> {
     return this.chService.getTopByVolume(limit);
+  }
+
+  // ── Recent Trades (cross-artwork) ─────────────────────────────────────────
+
+  async getRecentTrades(limit = 20) {
+    return this.txRepo.findRecent(Math.min(limit, 50));
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

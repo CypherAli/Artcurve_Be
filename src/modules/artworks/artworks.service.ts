@@ -402,6 +402,29 @@ export class ArtworksService {
     return { image_uri: imageUri, metadata_uri: metadataUri, gateway_image_url: gatewayImageUrl };
   }
 
+  // ─── getPlatformStats ──────────────────────────────────────────────────────
+
+  async getPlatformStats(): Promise<{ artworkCount: number; totalVolumeEth: string; collectorCount: number }> {
+    const [artworkCount, volumeResult, collectorCount] = await Promise.all([
+      this.artworkRepo.count({ where: { status: ArtworkStatus.ACTIVE } }),
+      this.txRepo
+        .createQueryBuilder('tx')
+        .select('COALESCE(SUM(CAST(tx.eth_amount AS DECIMAL(38,18))), 0)', 'vol')
+        .getRawOne<{ vol: string }>(),
+      this.txRepo
+        .createQueryBuilder('tx')
+        .select('COUNT(DISTINCT tx.user_id)', 'cnt')
+        .getRawOne<{ cnt: string }>(),
+    ]);
+
+    const vol = parseFloat(volumeResult?.vol ?? '0');
+    return {
+      artworkCount,
+      totalVolumeEth: vol.toFixed(4),
+      collectorCount: parseInt(collectorCount?.cnt ?? '0', 10),
+    };
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   /**

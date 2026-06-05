@@ -42,6 +42,18 @@ export class TradesController {
   // ── GET /trades/leaderboard ─── PHẢI đặt TRƯỚC /:artworkId/* ─────────────
   // Express match route theo thứ tự. Nếu đặt sau, "leaderboard" bị nuốt vào :artworkId.
 
+  @Get('recent')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Giao dịch gần nhất toàn sàn — dùng cho Live Activity feed' })
+  @ApiQuery({ name: 'limit', type: Number, required: false })
+  @ApiResponse({ status: 200, description: 'Mảng transaction sorted DESC theo timestamp' })
+  async getRecentTrades(
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.tradesService.getRecentTrades(limit);
+  }
+
   @Get('leaderboard')
   @Public()
   @HttpCode(HttpStatus.OK)

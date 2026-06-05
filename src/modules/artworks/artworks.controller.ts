@@ -106,6 +106,17 @@ export class ArtworksController {
     return this.artworksService.getMyArtworks(user.id);
   }
 
+  // ─── GET /artworks/stats — Platform stats ─────────────────────────────────
+
+  @Get('stats')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Platform stats — artwork count, total volume ETH, collector count' })
+  @ApiResponse({ status: 200, description: 'Platform statistics' })
+  async getPlatformStats() {
+    return this.artworksService.getPlatformStats();
+  }
+
   // ─── GET /artworks/:id — Artwork detail ───────────────────────────────────
   // QUAN TRỌNG: Route này phải đặt SAU /search và /my để tránh conflict
   // (Express route matching — nếu đặt trước, "search" sẽ bị parse là UUID)
