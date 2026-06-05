@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   UnauthorizedException,
   ForbiddenException,
+  CanActivate,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
@@ -16,7 +17,7 @@ import { JwtPayload } from '../auth.service';
 // Sau khi verify JWT -> kiem tra blacklist Redis -> neu bi logout -> tu choi
 
 @Injectable()
-export class JwtAuthGuard {
+export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector:     Reflector,
     private readonly jwtService:    JwtService,
@@ -58,7 +59,10 @@ export class JwtAuthGuard {
       }
     }
 
-    request['user'] = payload;
+    // Map sub → id sao cho tất cả controllers dùng user.id đều hoạt động.
+    // sub = UUID của user trong PostgreSQL (set khi issue JWT).
+    // Giữ nguyên tất cả field gốc (wallet, role, jti) để backward-compat.
+    request['user'] = { ...payload, id: payload.sub };
     return true;
   }
 }

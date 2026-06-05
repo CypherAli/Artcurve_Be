@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SiweMessage } from 'siwe';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash, createHmac, randomBytes } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from '../../shared/redis/redis.service';
 
@@ -150,15 +151,16 @@ export class AuthService {
   }> {
     const normalized = walletAddress.toLowerCase();
 
-    // 1. Đọc nonce từ Redis (kiểm tra còn tồn tại và chưa hết hạn)
-    const storedNonce = await this.redisService.getNonce(normalized);
+    // 1. Atomic consume nonce TRƯỚC KHI verify — chặn hoàn toàn replay attack.
+    //    GETDEL: nếu 2 request đến cùng lúc, chỉ 1 cái lấy được nonce; cái còn lại thấy null.
+    const storedNonce = await this.redisService.consumeNonce(normalized);
     if (!storedNonce) {
       throw new UnauthorizedException(
         'Nonce hết hạn hoặc không tồn tại. Gọi lại /auth/nonce để lấy nonce mới.',
       );
     }
 
-    // 2. Parse và verify SIWE message
+    // 2. Parse và verify SIWE message (nonce đã consumed, không thể replay)
     let siweMessage: SiweMessage;
     try {
       siweMessage = new SiweMessage(rawMessage);
@@ -173,15 +175,11 @@ export class AuthService {
         nonce:     storedNonce,
       });
     } catch (err) {
-      // SiweMessage.verify() ném lỗi với message mô tả cụ thể
       this.logger.warn(`[SIWE] Verify failed for ${normalized}: ${err}`);
       throw new UnauthorizedException(
         `Xác thực SIWE thất bại: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-
-    // 3. Tiêu thụ nonce (atomic GETDEL) — chống replay attack
-    await this.redisService.consumeNonce(normalized);
 
     // 4. Lấy thông tin user từ PostgreSQL
     const users = await this.dataSource.query(
@@ -222,24 +220,299 @@ export class AuthService {
     };
   }
 
+  // ── githubLogin ───────────────────────────────────────────────────────────
+  async githubLogin(code: string): Promise<{
+    access_token: string;
+    expires_in:   number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    // 1. Exchange code → GitHub access token
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        client_id:     this.config.get('GITHUB_CLIENT_ID'),
+        client_secret: this.config.get('GITHUB_CLIENT_SECRET'),
+        code,
+      }),
+    });
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenData.access_token) {
+      throw new UnauthorizedException('GitHub OAuth thất bại — không lấy được access token');
+    }
+
+    // 2. Lấy profile GitHub
+    const profileRes = await fetch('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, 'User-Agent': 'ArtCurve' },
+    });
+    const profile = await profileRes.json() as any;
+
+    // 3. Derive wallet address từ GitHub ID (deterministic, 42 chars)
+    const walletAddress = `0x${Number(profile.id).toString(16).padStart(40, '0')}`;
+
+    // 4. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url, email)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+           email      = COALESCE(EXCLUDED.email,      users.email)`,
+      [walletAddress, profile.login ?? null, profile.avatar_url ?? null, profile.email ?? null],
+    );
+
+    const users = await this.dataSource.query(
+      `SELECT id, wallet_address, username, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = users[0];
+
+    // 5. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+
+    this.logger.log(`[GitHub] JWT issued: github=${profile.login}, wallet=${walletAddress}`);
+    return {
+      access_token,
+      expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // ── Twitter OAuth 1.0a helpers ────────────────────────────────────────────
+
+  private twitterOAuthSign(
+    method: string, url: string,
+    params: Record<string, string>,
+    consumerSecret: string, tokenSecret = '',
+  ): string {
+    const sorted = Object.entries(params)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const base   = `${method.toUpperCase()}&${encodeURIComponent(url)}&${encodeURIComponent(sorted)}`;
+    const key    = `${encodeURIComponent(consumerSecret)}&${encodeURIComponent(tokenSecret)}`;
+    return createHmac('sha1', key).update(base).digest('base64');
+  }
+
+  private twitterOAuthHeader(
+    method: string, url: string,
+    consumerKey: string, consumerSecret: string,
+    extraParams: Record<string, string> = {},
+    token = '', tokenSecret = '',
+  ): string {
+    const base: Record<string, string> = {
+      oauth_consumer_key:     consumerKey,
+      oauth_nonce:            randomBytes(16).toString('hex'),
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp:        String(Math.floor(Date.now() / 1000)),
+      oauth_version:          '1.0',
+      ...extraParams,
+    };
+    if (token) base.oauth_token = token;
+
+    const sig = this.twitterOAuthSign(method, url, base, consumerSecret, tokenSecret);
+    base.oauth_signature = sig;
+
+    return 'OAuth ' + Object.entries(base)
+      .map(([k, v]) => `${encodeURIComponent(k)}="${encodeURIComponent(v)}"`)
+      .join(', ');
+  }
+
+  // ── twitterRequestToken ───────────────────────────────────────────────────
+  async getTwitterRequestToken(callbackUrl: string): Promise<string> {
+    const ck = this.config.get('TWITTER_CONSUMER_KEY', '');
+    const cs = this.config.get('TWITTER_CONSUMER_SECRET', '');
+    const url = 'https://api.twitter.com/oauth/request_token';
+
+    const header = this.twitterOAuthHeader('POST', url, ck, cs, { oauth_callback: callbackUrl });
+    const res    = await fetch(url, { method: 'POST', headers: { Authorization: header } });
+    if (!res.ok) throw new UnauthorizedException(`Twitter request token failed (${res.status})`);
+
+    const body   = await res.text();
+    const params = new URLSearchParams(body);
+    const token  = params.get('oauth_token') ?? '';
+    const secret = params.get('oauth_token_secret') ?? '';
+
+    // Store token_secret in Redis keyed by token (TTL 10 min)
+    await this.redisService.setTemp(`twitter_ts:${token}`, secret, 600);
+    return token;
+  }
+
+  // ── twitterLogin (OAuth 1.0a) ──────────────────────────────────────────────
+  async twitterLogin(oauthToken: string, oauthVerifier: string): Promise<{
+    access_token: string;
+    expires_in:   number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    const ck = this.config.get('TWITTER_CONSUMER_KEY', '');
+    const cs = this.config.get('TWITTER_CONSUMER_SECRET', '');
+
+    // 1. Retrieve stored token secret
+    const tokenSecret = await this.redisService.getTemp(`twitter_ts:${oauthToken}`) ?? '';
+    await this.redisService.deleteTemp(`twitter_ts:${oauthToken}`);
+
+    // 2. Exchange for access token
+    const tokenUrl = 'https://api.twitter.com/oauth/access_token';
+    const header   = this.twitterOAuthHeader('POST', tokenUrl, ck, cs,
+      { oauth_verifier: oauthVerifier }, oauthToken, tokenSecret);
+
+    const res  = await fetch(tokenUrl, { method: 'POST', headers: { Authorization: header } });
+    const body = await res.text();
+    const p    = new URLSearchParams(body);
+
+    const accessToken       = p.get('oauth_token') ?? '';
+    const accessTokenSecret = p.get('oauth_token_secret') ?? '';
+    const userId            = p.get('user_id') ?? '';
+    const screenName        = p.get('screen_name') ?? '';
+
+    if (!userId) throw new UnauthorizedException('Twitter login failed — no user_id');
+
+    // 3. Get full profile (avatar)
+    const profileBaseUrl = 'https://api.twitter.com/1.1/account/verify_credentials.json';
+    const profileUrl     = `${profileBaseUrl}?skip_status=true&include_entities=false`;
+    const profileHeader  = this.twitterOAuthHeader('GET', profileBaseUrl, ck, cs,
+      { skip_status: 'true', include_entities: 'false' }, accessToken, accessTokenSecret);
+    const profileRes = await fetch(profileUrl, { headers: { Authorization: profileHeader } });
+    const profile    = profileRes.ok ? await profileRes.json() as any : {};
+
+    const avatarUrl = profile.profile_image_url_https?.replace('_normal', '') ?? null;
+
+    // 4. Derive wallet address from Twitter user ID
+    const walletAddress = `0x${BigInt(userId).toString(16).padStart(40, '0')}`;
+
+    // 5. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url)`,
+      [walletAddress, screenName || null, avatarUrl],
+    );
+    const rows = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = rows[0];
+
+    // 6. Issue JWT
+    const jti      = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+
+    this.logger.log(`[Twitter] JWT issued: @${screenName}, wallet=${walletAddress}`);
+    return {
+      access_token, expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // ── telegramLogin ─────────────────────────────────────────────────────────
+  async telegramLogin(tgData: Record<string, string>): Promise<{
+    access_token: string; expires_in: number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    const botToken = this.config.get('TELEGRAM_BOT_TOKEN', '');
+
+    // 1. Verify Telegram hash
+    const { hash, ...dataWithoutHash } = tgData;
+    const checkArr = Object.keys(dataWithoutHash)
+      .sort()
+      .map(k => `${k}=${dataWithoutHash[k]}`);
+    const checkStr   = checkArr.join('\n');
+    const secretKey  = createHash('sha256').update(botToken).digest();
+    const computed   = createHmac('sha256', secretKey).update(checkStr).digest('hex');
+
+    if (computed !== hash) throw new UnauthorizedException('Telegram auth hash mismatch');
+
+    // 2. Validate auth_date — chỉ chấp nhận trong vòng 5 phút (300s).
+    //    86400s (1 ngày) quá rộng — cho phép replay token cũ cả ngày.
+    const authDate   = parseInt(tgData.auth_date, 10);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const diff       = nowSeconds - authDate;
+    if (isNaN(authDate) || diff < -10 || diff > 300) {
+      throw new UnauthorizedException(
+        'Telegram auth timestamp không hợp lệ hoặc đã hết hạn (tối đa 5 phút).',
+      );
+    }
+
+    const tgId     = tgData.id;
+    const username = tgData.username ?? tgData.first_name ?? null;
+    const avatar   = tgData.photo_url ?? null;
+
+    // 3. Derive deterministic wallet address from Telegram ID
+    const walletAddress = `0x${BigInt(tgId).toString(16).padStart(40, '0')}`;
+
+    // 4. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url)`,
+      [walletAddress, username, avatar],
+    );
+    const rows = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = rows[0];
+
+    // 5. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+    this.logger.log(`[Telegram] JWT issued: tgId=${tgId}, @${username}, wallet=${walletAddress}`);
+    return {
+      access_token, expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
   // ── logout ─────────────────────────────────────────────────────────────────
   /**
    * Thu hồi JWT — ghi jti vào Redis blacklist.
    * Token vẫn hợp lệ về mặt chữ ký nhưng JwtAuthGuard sẽ từ chối.
    */
   async logout(token: string): Promise<void> {
-    try {
-      const payload = this.jwtService.decode(token) as JwtPayload & { exp: number };
-      if (!payload?.jti) return;
+    if (!token) throw new UnauthorizedException('Token required for logout');
 
-      const remaining = payload.exp - Math.floor(Date.now() / 1000);
-      if (remaining > 0) {
-        await this.redisService.blacklistJwt(payload.jti, remaining);
-        this.logger.log(`[JWT] Blacklisted: jti=${payload.jti}`);
-      }
-    } catch {
-      // Bỏ qua lỗi decode khi logout
+    let payload: (JwtPayload & { exp: number }) | null = null;
+    try {
+      // verify() thay vì decode() — đảm bảo token là authentic, không phải giả mạo
+      payload = this.jwtService.verify<JwtPayload & { exp: number }>(token, {
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+      });
+    } catch (err) {
+      this.logger.warn(`[JWT] Logout with invalid token: ${err instanceof Error ? err.message : err}`);
+      throw new UnauthorizedException('Token không hợp lệ');
     }
+
+    if (!payload.jti) {
+      this.logger.warn(`[JWT] Logout token missing jti: sub=${payload.sub}`);
+      throw new UnauthorizedException('Token không có jti — không thể logout');
+    }
+
+    const remaining = payload.exp - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) {
+      // Token đã hết hạn — không cần blacklist
+      this.logger.debug(`[JWT] Logout token already expired: jti=${payload.jti}`);
+      return;
+    }
+
+    await this.redisService.blacklistJwt(payload.jti, remaining);
+    this.logger.log(`[JWT] Blacklisted: jti=${payload.jti} remaining=${remaining}s`);
   }
 
   // ── validateJwtPayload ─────────────────────────────────────────────────────

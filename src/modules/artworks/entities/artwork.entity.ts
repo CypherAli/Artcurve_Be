@@ -52,10 +52,24 @@ export class Artwork {
   @Column({ type: 'uuid', name: 'creator_id' })
   creator_id: string;
 
-  // contract_address nullable — chưa có khi DRAFT, set khi ACTIVE
-  @Index('idx_artworks_contract_address', { unique: true })
+  // contract_address = AMM clone address (set bởi BlockchainEventConsumer khi ArtworkCreated)
+  // Nullable vì DRAFT chưa được deploy
+  @Index('idx_artworks_contract_address', { unique: true, sparse: true })
   @Column({ type: 'varchar', length: 42, nullable: true, default: null })
   contract_address: string | null;
+
+  // amm_address = địa chỉ AMM contract — dùng để map Trade event → artwork UUID
+  // Cùng giá trị với contract_address nhưng được set sớm hơn (tại ArtworkCreated event)
+  // Index unique để lookup O(1): SELECT id FROM artworks WHERE amm_address = $1
+  @Index('idx_artworks_amm_address', { unique: true, sparse: true })
+  @Column({ type: 'varchar', length: 42, nullable: true, default: null })
+  amm_address: string | null;
+
+  // onchain_id = sequential ID từ smart contract (uint256 → string để tránh overflow)
+  // Dùng để cross-reference với on-chain data; không thay thế UUID làm PK
+  @Index('idx_artworks_onchain_id')
+  @Column({ type: 'varchar', length: 78, nullable: true, default: null })
+  onchain_id: string | null;
 
   // ── Core content ─────────────────────────────────────────────────────────
 

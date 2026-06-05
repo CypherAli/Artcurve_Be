@@ -127,9 +127,9 @@ export class EventsGateway
       this.broadcastTradeUpdated({
         artwork_id:      event.artwork_id,
         tx_hash:         event.tx_hash,
-        is_buy:          true,
-        user_wallet:     '',
-        share_amount:    '0',
+        is_buy:          event.is_buy ?? true,
+        user_wallet:     event.user_wallet ?? '',
+        share_amount:    event.share_amount ?? '0',
         eth_amount:      event.volume_24h,
         price_per_share: event.current_price,
         block_number:    '0',

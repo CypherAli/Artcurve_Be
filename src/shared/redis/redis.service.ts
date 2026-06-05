@@ -12,12 +12,16 @@ export interface ArtworkPriceCache {
 }
 
 export interface PriceUpdatedEvent {
-  artwork_id: string;
-  current_price: string;
+  artwork_id:     string;
+  current_price:  string;
   current_supply: string;
-  volume_24h: string;
-  tx_hash: string;
-  timestamp: number;
+  volume_24h:     string;
+  tx_hash:        string;
+  timestamp:      number;
+  // Trade metadata — dùng bởi EventsGateway để broadcast trade_updated
+  is_buy?:      boolean;
+  user_wallet?: string;
+  share_amount?: string;
 }
 
 // ── RedisService ──────────────────────────────────────────────────────────────
@@ -86,6 +90,34 @@ export class RedisService {
     this.nonceStore.delete(wallet)
     if (Date.now() > entry.expiresAt) return null
     return entry.nonce
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // GENERIC TEMP STORE — dùng cho OAuth token_secret (TTL ngắn)
+  // ════════════════════════════════════════════════════════════════════════════
+  private readonly tempStore = new Map<string, { value: string; expiresAt: number }>()
+
+  async setTemp(key: string, value: string, ttlSeconds = 300): Promise<void> {
+    if (this.redisReady) {
+      await this.redis.setex(`temp:${key}`, ttlSeconds, value)
+    } else {
+      this.tempStore.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 })
+    }
+  }
+
+  async getTemp(key: string): Promise<string | null> {
+    if (this.redisReady) {
+      return this.redis.get(`temp:${key}`)
+    }
+    const entry = this.tempStore.get(key)
+    if (!entry) return null
+    if (Date.now() > entry.expiresAt) { this.tempStore.delete(key); return null }
+    return entry.value
+  }
+
+  async deleteTemp(key: string): Promise<void> {
+    if (this.redisReady) await this.redis.del(`temp:${key}`)
+    else this.tempStore.delete(key)
   }
 
   // ════════════════════════════════════════════════════════════════════════════

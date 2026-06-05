@@ -3,20 +3,36 @@ import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import { BlockchainEventConsumer } from './event.consumer';
 
-// ─── RabbitMQ Queue & Routing Keys ───────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  RabbitMQ Consumer — đồng bộ với ProducerService
+//
+//  Exchange: artcurve.blockchain (topic, durable)
+//
+//  Routing keys & queues (khớp với producer.service.ts):
+//    blockchain.artwork.created  → artcurve.artwork.created
+//    blockchain.trade.executed   → artcurve.trade.executed   (is_buy phân nhánh)
+//    blockchain.graduated        → artcurve.tx.graduated
+//
+//  Thiết kế:
+//    - prefetch(1): xử lý tuần tự, tránh race condition khi update balance
+//    - DLQ: message lỗi đẩy vào artcurve.blockchain.dlx
+//    - Reconnect: tự động sau 5s khi mất kết nối
+// ─────────────────────────────────────────────────────────────────────────────
+
 const EXCHANGE = 'artcurve.blockchain';
+const DLX      = `${EXCHANGE}.dlx`;
+
+// Khớp chính xác với env.validation.ts defaults và producer.service.ts
 const QUEUES = {
-  BUY_SHARES: 'artcurve.tx.buy_shares',
-  SELL_SHARES: 'artcurve.tx.sell_shares',
-  GRADUATED: 'artcurve.tx.graduated',
-  AI_MODERATION: 'artcurve.moderation.result',
+  ARTWORK_CREATED: 'artcurve.artwork.created',
+  TRADE_EXECUTED:  'artcurve.trade.executed',
+  GRADUATED:       'artcurve.tx.graduated',
 } as const;
 
 const ROUTING_KEYS = {
-  BUY_SHARES: 'blockchain.buy_shares',
-  SELL_SHARES: 'blockchain.sell_shares',
-  GRADUATED: 'blockchain.graduated',
-  AI_MODERATION: 'moderation.result',
+  ARTWORK_CREATED: 'blockchain.artwork.created',
+  TRADE_EXECUTED:  'blockchain.trade.executed',
+  GRADUATED:       'blockchain.graduated',
 } as const;
 
 @Injectable()
@@ -26,12 +42,12 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
   private channel: amqp.Channel;
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly config:        ConfigService,
     private readonly eventConsumer: BlockchainEventConsumer,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // Non-blocking: do not await — RabbitMQ may be unavailable in dev
+    // Non-blocking: RabbitMQ có thể không có trong dev
     this.connect();
   }
 
@@ -40,26 +56,27 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
 
     try {
       this.connection = await amqp.connect(url) as amqp.ChannelModel;
-      this.channel = await this.connection.createChannel();
+      this.channel    = await this.connection.createChannel();
 
-      // Setup exchange + queues với durable = true để không mất message khi restart
+      // Dead Letter Exchange cho tất cả queues
       await this.channel.assertExchange(EXCHANGE, 'topic', { durable: true });
+      await this.channel.assertExchange(DLX,      'topic', { durable: true });
 
-      await this.setupQueue(QUEUES.BUY_SHARES, ROUTING_KEYS.BUY_SHARES);
-      await this.setupQueue(QUEUES.SELL_SHARES, ROUTING_KEYS.SELL_SHARES);
-      await this.setupQueue(QUEUES.GRADUATED, ROUTING_KEYS.GRADUATED);
-      await this.setupQueue(QUEUES.AI_MODERATION, ROUTING_KEYS.AI_MODERATION);
+      await this.setupQueue(QUEUES.ARTWORK_CREATED, ROUTING_KEYS.ARTWORK_CREATED);
+      await this.setupQueue(QUEUES.TRADE_EXECUTED,  ROUTING_KEYS.TRADE_EXECUTED);
+      await this.setupQueue(QUEUES.GRADUATED,       ROUTING_KEYS.GRADUATED);
 
       await this.startConsumers();
 
       this.connection.on('error', (err) => {
-        this.logger.error('RabbitMQ connection error', err.message);
-        setTimeout(() => this.connect(), 5000); // Reconnect sau 5s
+        this.logger.error(`RabbitMQ connection error: ${err.message}`);
+        setTimeout(() => this.connect(), 5000);
       });
 
-      this.logger.log('RabbitMQ consumer connected');
+      this.logger.log(`[RabbitMQ] Consumer connected. Queues: ${Object.values(QUEUES).join(', ')}`);
+
     } catch (err) {
-      this.logger.error(`RabbitMQ connect failed: ${err.message}`);
+      this.logger.error(`[RabbitMQ] Connect failed: ${err.message}`);
       setTimeout(() => this.connect(), 5000);
     }
   }
@@ -68,35 +85,42 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
     await this.channel.assertQueue(queue, {
       durable: true,
       arguments: {
-        // Dead Letter Exchange — message lỗi đẩy vào DLQ để debug
-        'x-dead-letter-exchange': `${EXCHANGE}.dlx`,
-        'x-message-ttl': 86400000, // 24h TTL
+        'x-dead-letter-exchange': DLX,
+        'x-message-ttl':          86_400_000, // 24h TTL
       },
     });
     await this.channel.bindQueue(queue, EXCHANGE, routingKey);
   }
 
   private async startConsumers(): Promise<void> {
-    // Prefetch = 1: xử lý tuần tự, tránh race condition khi update balance
+    // prefetch(1): xử lý tuần tự để tránh race condition khi update balance
     this.channel.prefetch(1);
 
-    // Consumer: BuyShares
-    await this.channel.consume(QUEUES.BUY_SHARES, async (msg) => {
+    // ── ArtworkCreated ──────────────────────────────────────────────────────
+    // Payload: ArtworkCreatedPayload { amm_address, creator, artwork_id (onchain), ... }
+    // Action: map creator wallet → DB user_id, set amm_address + onchain_id trên artwork
+    await this.channel.consume(QUEUES.ARTWORK_CREATED, async (msg) => {
       if (!msg) return;
       await this.processMessage(msg, (payload) =>
-        this.eventConsumer.handleBuyShares(payload),
+        this.eventConsumer.handleArtworkCreated(payload),
       );
     });
 
-    // Consumer: SellShares
-    await this.channel.consume(QUEUES.SELL_SHARES, async (msg) => {
+    // ── TradeExecuted (BUY & SELL trong cùng 1 queue) ───────────────────────
+    // Payload: TradeExecutedPayload { is_buy, amm_address, user_wallet, ... }
+    // Action: phân nhánh theo is_buy → handleBuyShares / handleSellShares
+    await this.channel.consume(QUEUES.TRADE_EXECUTED, async (msg) => {
       if (!msg) return;
-      await this.processMessage(msg, (payload) =>
-        this.eventConsumer.handleSellShares(payload),
-      );
+      await this.processMessage(msg, async (payload) => {
+        if (payload.is_buy) {
+          await this.eventConsumer.handleBuyShares(payload);
+        } else {
+          await this.eventConsumer.handleSellShares(payload);
+        }
+      });
     });
 
-    // Consumer: Graduated
+    // ── GraduatedToDEX ─────────────────────────────────────────────────────
     await this.channel.consume(QUEUES.GRADUATED, async (msg) => {
       if (!msg) return;
       await this.processMessage(msg, (payload) =>
@@ -109,26 +133,25 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
     msg: amqp.Message,
     handler: (payload: any) => Promise<void>,
   ): Promise<void> {
-    const content = msg.content.toString();
     let payload: any;
-
     try {
-      payload = JSON.parse(content);
+      payload = JSON.parse(msg.content.toString());
     } catch {
-      this.logger.error('Invalid JSON message, sending to DLQ');
-      this.channel.nack(msg, false, false); // Không requeue — đẩy vào DLQ
+      this.logger.error('[RabbitMQ] Invalid JSON — sending to DLQ');
+      this.channel.nack(msg, false, false);
       return;
     }
 
     try {
       await handler(payload);
-      this.channel.ack(msg); // Ack sau khi xử lý thành công
+      this.channel.ack(msg);
     } catch (err) {
-      this.logger.error(`Message processing failed: ${err.message}`, {
+      this.logger.error(`[RabbitMQ] Handler failed: ${err.message}`, {
+        routing_key: msg.fields.routingKey,
         payload,
-        error: err.stack,
+        stack: err.stack,
       });
-      // requeue = false → đẩy vào DLQ sau MAX_RETRY (configure ở RabbitMQ policy)
+      // requeue=false → DLQ sau khi vượt MAX_RETRY (configure ở RabbitMQ policy)
       this.channel.nack(msg, false, false);
     }
   }

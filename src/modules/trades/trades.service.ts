@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InfraClickHouseService, OhlcvTimeframe, OhlcvCandle } from '../../shared/clickhouse/clickhouse-infra.service';
+import { TransactionRepository } from './repositories/transaction.repository';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TradesService  (src/modules/trades/)
@@ -43,6 +44,7 @@ export class TradesService {
 
   constructor(
     private readonly chService: InfraClickHouseService,
+    private readonly txRepo: TransactionRepository,
   ) {}
 
   // ── OHLCV (Candlestick Chart) ──────────────────────────────────────────────
@@ -81,9 +83,19 @@ export class TradesService {
     limit  = 50,
     offset = 0,
   ): Promise<TradeHistoryItem[]> {
-    // TODO: delegate to chService.getTradeHistory() sau khi thêm method
     this.logger.debug(`[TradeHistory] artworkId=${artworkId} limit=${limit} offset=${offset}`);
-    return [];  // Placeholder — implement khi cần
+    const rows = await this.chService.getTradeHistory(artworkId, limit, offset);
+    return rows.map(r => ({
+      tx_hash:         r.tx_hash,
+      tx_type:         r.tx_type,
+      user_id:         r.user_id,
+      share_amount:    r.share_amount,
+      eth_amount:      r.eth_amount,
+      price_per_share: r.price_per_share,
+      gas_fee:         r.gas_fee,
+      block_number:    r.block_number,
+      timestamp:       r.timestamp,
+    }));
   }
 
   // ── Volume Stats ───────────────────────────────────────────────────────────
@@ -101,6 +113,12 @@ export class TradesService {
    */
   async getTopByVolume(limit = 20): Promise<VolumeStatsResult[]> {
     return this.chService.getTopByVolume(limit);
+  }
+
+  // ── Recent Trades (cross-artwork) ─────────────────────────────────────────
+
+  async getRecentTrades(limit = 20) {
+    return this.txRepo.findRecent(Math.min(limit, 50));
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
