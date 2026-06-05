@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   ConflictException,
   Logger,
 } from '@nestjs/common';
@@ -249,9 +250,18 @@ export class ArtworksService {
    * Chuyển state machine — validate transition trước khi update.
    * Chuyển sang ACTIVE bắt buộc có contract_address và ipfs_metadata_uri.
    */
-  async updateArtworkStatus(artworkId: string, dto: UpdateArtworkStatusDto): Promise<Artwork> {
+  async updateArtworkStatus(
+    currentUserId: string,
+    artworkId: string,
+    dto: UpdateArtworkStatusDto,
+  ): Promise<Artwork> {
     const artwork = await this.artworkRepo.findOne({ where: { id: artworkId } });
     if (!artwork) throw new NotFoundException(`Artwork ${artworkId} không tồn tại`);
+
+    // Chỉ creator hoặc admin mới được phép thay đổi trạng thái
+    if (artwork.creator_id !== currentUserId) {
+      throw new ForbiddenException('Chỉ creator mới được phép cập nhật trạng thái artwork');
+    }
 
     const newStatus = dto.status as ArtworkStatus;
     const allowed   = VALID_TRANSITIONS[artwork.status];

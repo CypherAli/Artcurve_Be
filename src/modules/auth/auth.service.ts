@@ -151,15 +151,16 @@ export class AuthService {
   }> {
     const normalized = walletAddress.toLowerCase();
 
-    // 1. Đọc nonce từ Redis (kiểm tra còn tồn tại và chưa hết hạn)
-    const storedNonce = await this.redisService.getNonce(normalized);
+    // 1. Atomic consume nonce TRƯỚC KHI verify — chặn hoàn toàn replay attack.
+    //    GETDEL: nếu 2 request đến cùng lúc, chỉ 1 cái lấy được nonce; cái còn lại thấy null.
+    const storedNonce = await this.redisService.consumeNonce(normalized);
     if (!storedNonce) {
       throw new UnauthorizedException(
         'Nonce hết hạn hoặc không tồn tại. Gọi lại /auth/nonce để lấy nonce mới.',
       );
     }
 
-    // 2. Parse và verify SIWE message
+    // 2. Parse và verify SIWE message (nonce đã consumed, không thể replay)
     let siweMessage: SiweMessage;
     try {
       siweMessage = new SiweMessage(rawMessage);
@@ -174,15 +175,11 @@ export class AuthService {
         nonce:     storedNonce,
       });
     } catch (err) {
-      // SiweMessage.verify() ném lỗi với message mô tả cụ thể
       this.logger.warn(`[SIWE] Verify failed for ${normalized}: ${err}`);
       throw new UnauthorizedException(
         `Xác thực SIWE thất bại: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-
-    // 3. Tiêu thụ nonce (atomic GETDEL) — chống replay attack
-    await this.redisService.consumeNonce(normalized);
 
     // 4. Lấy thông tin user từ PostgreSQL
     const users = await this.dataSource.query(
@@ -436,9 +433,16 @@ export class AuthService {
 
     if (computed !== hash) throw new UnauthorizedException('Telegram auth hash mismatch');
 
-    // 2. Check auth_date (must be within 1 day)
-    const authDate = parseInt(tgData.auth_date, 10);
-    if (Date.now() / 1000 - authDate > 86400) throw new UnauthorizedException('Telegram auth expired');
+    // 2. Validate auth_date — chỉ chấp nhận trong vòng 5 phút (300s).
+    //    86400s (1 ngày) quá rộng — cho phép replay token cũ cả ngày.
+    const authDate   = parseInt(tgData.auth_date, 10);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const diff       = nowSeconds - authDate;
+    if (isNaN(authDate) || diff < -10 || diff > 300) {
+      throw new UnauthorizedException(
+        'Telegram auth timestamp không hợp lệ hoặc đã hết hạn (tối đa 5 phút).',
+      );
+    }
 
     const tgId     = tgData.id;
     const username = tgData.username ?? tgData.first_name ?? null;
@@ -482,18 +486,33 @@ export class AuthService {
    * Token vẫn hợp lệ về mặt chữ ký nhưng JwtAuthGuard sẽ từ chối.
    */
   async logout(token: string): Promise<void> {
-    try {
-      const payload = this.jwtService.decode(token) as JwtPayload & { exp: number };
-      if (!payload?.jti) return;
+    if (!token) throw new UnauthorizedException('Token required for logout');
 
-      const remaining = payload.exp - Math.floor(Date.now() / 1000);
-      if (remaining > 0) {
-        await this.redisService.blacklistJwt(payload.jti, remaining);
-        this.logger.log(`[JWT] Blacklisted: jti=${payload.jti}`);
-      }
-    } catch {
-      // Bỏ qua lỗi decode khi logout
+    let payload: (JwtPayload & { exp: number }) | null = null;
+    try {
+      // verify() thay vì decode() — đảm bảo token là authentic, không phải giả mạo
+      payload = this.jwtService.verify<JwtPayload & { exp: number }>(token, {
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+      });
+    } catch (err) {
+      this.logger.warn(`[JWT] Logout with invalid token: ${err instanceof Error ? err.message : err}`);
+      throw new UnauthorizedException('Token không hợp lệ');
     }
+
+    if (!payload.jti) {
+      this.logger.warn(`[JWT] Logout token missing jti: sub=${payload.sub}`);
+      throw new UnauthorizedException('Token không có jti — không thể logout');
+    }
+
+    const remaining = payload.exp - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) {
+      // Token đã hết hạn — không cần blacklist
+      this.logger.debug(`[JWT] Logout token already expired: jti=${payload.jti}`);
+      return;
+    }
+
+    await this.redisService.blacklistJwt(payload.jti, remaining);
+    this.logger.log(`[JWT] Blacklisted: jti=${payload.jti} remaining=${remaining}s`);
   }
 
   // ── validateJwtPayload ─────────────────────────────────────────────────────

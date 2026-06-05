@@ -14,6 +14,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -225,10 +226,11 @@ export class ArtworksController {
   @ApiResponse({ status: 400, description: 'Transition không hợp lệ hoặc thiếu trường bắt buộc' })
   @ApiResponse({ status: 404, description: 'Artwork không tồn tại' })
   async updateStatus(
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateArtworkStatusDto,
   ) {
-    return this.artworksService.updateArtworkStatus(id, dto);
+    return this.artworksService.updateArtworkStatus(user.id, id, dto);
   }
 
   // ─── GET /artworks/:id/history ────────────────────────────────────────────

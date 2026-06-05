@@ -1,5 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule }   from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD }      from '@nestjs/core';
 import { LoggerMiddleware, CorrelationIdMiddleware } from './app.middleware';
 
 import { envValidationSchema } from './config/env.validation';
@@ -67,6 +69,12 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
       },
     }),
 
+    // Rate limiting toàn cục — endpoint tự override bằng @Throttle()
+    ThrottlerModule.forRoot([{
+      ttl:   60_000,   // 1 phút window
+      limit: 120,      // 120 req/phút default; auth endpoints override xuống thấp hơn
+    }]),
+
     // ② Shared Infrastructure
     InfraRedisModule,          // INFRA_REDIS_CLIENT  — ioredis raw client
     InfraClickHouseModule,     // INFRA_CLICKHOUSE_CLIENT + ClickHouseSchemaService
@@ -97,6 +105,10 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
 
     // ⑨ Blockchain Pipeline (merged indexer + consumer)
     BlockchainModule,
+  ],
+  providers: [
+    // ThrottlerGuard áp dụng rate limit toàn cục; @SkipThrottle() để bypass ở endpoint cụ thể
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {
