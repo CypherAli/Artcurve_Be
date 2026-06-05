@@ -79,6 +79,39 @@ export class BlockchainEventConsumer {
     private readonly chBuffer:     ClickHouseBufferService,
   ) {}
 
+  // ── Payload validation ────────────────────────────────────────────────────
+
+  /**
+   * Validate các trường số trong trade payload trước khi ghi DB.
+   * Throw Error nếu bất kỳ trường nào không hợp lệ — consumer sẽ NACK → DLQ.
+   */
+  private validateTradePayload(p: TradeExecutedPayload): void {
+    const toDecimal = (v: string, field: string) => {
+      const n = parseFloat(v);
+      if (!isFinite(n) || isNaN(n)) throw new Error(`Invalid ${field}: "${v}" is not a number`);
+      if (n <= 0)                   throw new Error(`Invalid ${field}: "${v}" must be > 0`);
+      return n;
+    };
+
+    toDecimal(p.share_amount,    'share_amount');
+    toDecimal(p.eth_amount,      'eth_amount');
+    toDecimal(p.price_per_share, 'price_per_share');
+
+    const bn = parseInt(p.block_number, 10);
+    if (isNaN(bn) || bn < 0) throw new Error(`Invalid block_number: "${p.block_number}"`);
+
+    const ts = parseInt(p.timestamp, 10);
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Chấp nhận timestamp từ genesis (~2015) đến 5 phút trong tương lai
+    if (isNaN(ts) || ts < 1_420_000_000 || ts > nowSec + 300) {
+      throw new Error(`Invalid timestamp: "${p.timestamp}" (out of plausible range)`);
+    }
+
+    if (!p.tx_hash || !/^0x[0-9a-fA-F]{64}$/.test(p.tx_hash)) {
+      throw new Error(`Invalid tx_hash: "${p.tx_hash}"`);
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /**
@@ -206,6 +239,8 @@ export class BlockchainEventConsumer {
   // ── handleBuyShares ────────────────────────────────────────────────────────
 
   async handleBuyShares(payload: TradeExecutedPayload): Promise<void> {
+    this.validateTradePayload(payload);
+
     const qr = this.txRepo.manager.connection.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -340,6 +375,8 @@ export class BlockchainEventConsumer {
   // ── handleSellShares ───────────────────────────────────────────────────────
 
   async handleSellShares(payload: TradeExecutedPayload): Promise<void> {
+    this.validateTradePayload(payload);
+
     const qr = this.txRepo.manager.connection.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();

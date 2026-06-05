@@ -15,26 +15,66 @@ async function bootstrap() {
   const app    = await NestFactory.create(AppModule, { bufferLogs: true })
   const config = app.get(ConfigService)
 
-  // ── Security ──────────────────────────────────────────────────────
+  const isProd = config.get('NODE_ENV') === 'production'
+
+  // ── Security headers (Helmet) ────────────────────────────────────
   app.use(
     helmet({
-      // CSP cần tuỳ chỉnh nếu có Swagger UI (inline scripts)
-      contentSecurityPolicy: config.get('NODE_ENV') === 'production'
-        ? undefined  // strict CSP trên production
-        : false,     // tắt CSP trên dev để Swagger UI hoạt động
+      // Dev: tắt CSP để Swagger UI (inline scripts) hoạt động
+      // Prod: định nghĩa rõ ràng — không dùng undefined/default
+      contentSecurityPolicy: isProd
+        ? {
+            directives: {
+              'default-src':     ["'self'"],
+              'script-src':      ["'self'"],
+              'style-src':       ["'self'", 'https:'],
+              'img-src':         ["'self'", 'data:', 'https:'],
+              'font-src':        ["'self'", 'https:'],
+              'connect-src':     ["'self'"],
+              'frame-ancestors': ["'none'"],
+              'base-uri':        ["'self'"],
+              'form-action':     ["'self'"],
+              'object-src':      ["'none'"],
+              'upgrade-insecure-requests': [],
+            },
+          }
+        : false,
+      crossOriginEmbedderPolicy: isProd,
+      crossOriginOpenerPolicy:   isProd ? { policy: 'same-origin' } : false,
     }),
   )
   app.use(compression())
 
   // ── CORS ──────────────────────────────────────────────────────────
-  const allowedOrigins = (config.get<string>('CORS_ORIGINS') ?? config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000')
+  const rawOrigins = (
+    config.get<string>('CORS_ORIGINS') ??
+    config.get<string>('FRONTEND_URL') ??
+    'http://localhost:3000'
+  )
+  const allowedOrigins = rawOrigins
     .split(',')
     .map((s: string) => s.trim())
+    .filter(Boolean)
+
+  if (!allowedOrigins.length) {
+    throw new Error('CORS_ORIGINS or FRONTEND_URL must be configured')
+  }
+
+  // Production: từ chối non-HTTPS origin — tránh session hijack qua plaintext
+  if (isProd) {
+    const insecure = allowedOrigins.filter(o => !o.startsWith('https://'))
+    if (insecure.length) {
+      throw new Error(`Non-HTTPS CORS origins rejected in production: ${insecure.join(', ')}`)
+    }
+  }
+
   app.enableCors({
     origin:         allowedOrigins,
     credentials:    true,
     methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
+    exposedHeaders: ['X-Correlation-ID'],
+    maxAge:         3600,   // cache preflight 1 giờ
   })
 
   // ── Global middleware ─────────────────────────────────────────────
