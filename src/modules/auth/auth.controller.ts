@@ -5,10 +5,12 @@ import {
   Body,
   Headers,
   Query,
+  Req,
   Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Response } from 'express';
 import {
   ApiTags,
@@ -149,6 +151,86 @@ export class AuthController {
       res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
     } catch {
       res.redirect(`${frontendUrl}/?auth_error=twitter_failed`);
+    }
+  }
+
+  // ── GET /auth/apple ───────────────────────────────────────────────────────
+
+  @Get('apple')
+  @Public()
+  @ApiOperation({ summary: 'Apple Sign-In — redirect to Apple' })
+  appleRedirect(@Res() res: Response) {
+    const clientId   = this.config.get('APPLE_CLIENT_ID');
+    const backendUrl = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+    const redirectUri = encodeURIComponent(`${backendUrl}/api/v1/auth/apple/callback`);
+    const url = `https://appleid.apple.com/auth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=name%20email&response_mode=form_post`;
+    res.redirect(url);
+  }
+
+  // ── POST /auth/apple/callback ──────────────────────────────────────────────
+  // Apple sends callback as POST (form_post response_mode)
+
+  @Post('apple/callback')
+  @Public()
+  @ApiOperation({ summary: 'Apple Sign-In — callback & issue JWT' })
+  async appleCallback(@Body() body: any, @Res() res: Response) {
+    const frontendUrl = this.config.get('FRONTEND_URL', 'https://artcurve-fe.vercel.app');
+    try {
+      const result = await this.authService.appleLogin(body.code, body.user);
+      const params = new URLSearchParams({
+        token:    result.access_token,
+        address:  result.user.wallet_address,
+        name:     result.user.username ?? '',
+        avatar:   result.user.avatar_url ?? '',
+        provider: 'apple',
+      });
+      res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    } catch {
+      res.redirect(`${frontendUrl}/?auth_error=apple_failed`);
+    }
+  }
+
+  // ── GET /auth/telegram ────────────────────────────────────────────────────
+
+  @Get('telegram')
+  @Public()
+  @ApiOperation({ summary: 'Telegram Login — redirect to Telegram OAuth' })
+  telegramRedirect(@Res() res: Response) {
+    const botToken   = this.config.get('TELEGRAM_BOT_TOKEN', '');
+    const botId      = botToken.split(':')[0];
+    const backendUrl = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+    const returnTo   = encodeURIComponent(`${backendUrl}/api/v1/auth/telegram/callback`);
+    const origin     = encodeURIComponent(backendUrl);
+    res.redirect(`https://oauth.telegram.org/auth?bot_id=${botId}&origin=${origin}&return_to=${returnTo}`);
+  }
+
+  // ── GET /auth/telegram/callback ───────────────────────────────────────────
+
+  @Get('telegram/callback')
+  @Public()
+  @ApiOperation({ summary: 'Telegram Login — verify hash & issue JWT' })
+  async telegramCallback(@Query() query: Record<string, string>, @Res() res: Response) {
+    const frontendUrl = this.config.get('FRONTEND_URL', 'https://artcurve-fe.vercel.app');
+    try {
+      // Telegram may encode user data in tgAuthResult (base64url JSON)
+      let tgData = { ...query };
+      if (query.tgAuthResult) {
+        const decoded = Buffer.from(query.tgAuthResult, 'base64').toString();
+        Object.assign(tgData, JSON.parse(decoded));
+        delete tgData.tgAuthResult;
+      }
+
+      const result = await this.authService.telegramLogin(tgData);
+      const params = new URLSearchParams({
+        token:    result.access_token,
+        address:  result.user.wallet_address,
+        name:     result.user.username ?? '',
+        avatar:   result.user.avatar_url ?? '',
+        provider: 'telegram',
+      });
+      res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    } catch {
+      res.redirect(`${frontendUrl}/?auth_error=telegram_failed`);
     }
   }
 

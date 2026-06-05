@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SiweMessage } from 'siwe';
 import { v4 as uuidv4 } from 'uuid';
-import { createHash, createHmac, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, createSign, createPrivateKey } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from '../../shared/redis/redis.service';
 
@@ -412,6 +412,177 @@ export class AuthService {
     );
 
     this.logger.log(`[Twitter] JWT issued: @${screenName}, wallet=${walletAddress}`);
+    return {
+      access_token, expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // ── Apple Sign-In helpers ─────────────────────────────────────────────────
+
+  /** Generate Apple client_secret JWT (ES256, valid 6 months) */
+  private generateAppleClientSecret(): string {
+    const teamId    = this.config.get('APPLE_TEAM_ID', '');
+    const clientId  = this.config.get('APPLE_CLIENT_ID', '');
+    const keyId     = this.config.get('APPLE_KEY_ID', '');
+    const rawKey    = this.config.get('APPLE_PRIVATE_KEY', '').replace(/\\n/g, '\n');
+
+    const b64url = (buf: Buffer) =>
+      buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+    const header  = b64url(Buffer.from(JSON.stringify({ alg: 'ES256', kid: keyId })));
+    const now     = Math.floor(Date.now() / 1000);
+    const payload = b64url(Buffer.from(JSON.stringify({
+      iss: teamId, iat: now, exp: now + 15_777_000,
+      aud: 'https://appleid.apple.com', sub: clientId,
+    })));
+
+    const signingInput = `${header}.${payload}`;
+    const key  = createPrivateKey(rawKey);
+    const sign = createSign('SHA256');
+    sign.update(signingInput);
+    const der = sign.sign(key);
+
+    // Convert DER → raw r||s (32 bytes each) for ES256
+    let off = 2;
+    if (der[1] & 0x80) off += der[1] & 0x7f;
+    off++; // 0x02
+    const rLen = der[off++];
+    const r    = der.slice(off, off + rLen); off += rLen;
+    off++;                                   // 0x02
+    const sLen = der[off++];
+    const s    = der.slice(off, off + sLen);
+    const pad  = (b: Buffer) => Buffer.concat([Buffer.alloc(Math.max(0, 32 - b.length)), b.slice(-32)]);
+    const sig  = b64url(Buffer.concat([pad(r), pad(s)]));
+
+    return `${signingInput}.${sig}`;
+  }
+
+  // ── appleLogin ────────────────────────────────────────────────────────────
+  async appleLogin(code: string, rawUser?: string): Promise<{
+    access_token: string; expires_in: number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    const clientId   = this.config.get('APPLE_CLIENT_ID', '');
+    const backendUrl = this.config.get('APP_URI', 'https://artcurve-be.onrender.com');
+    const redirectUri = `${backendUrl}/api/v1/auth/apple/callback`;
+    const clientSecret = this.generateAppleClientSecret();
+
+    // 1. Exchange code → Apple tokens
+    const tokenRes = await fetch('https://appleid.apple.com/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'authorization_code',
+        code,
+        redirect_uri:  redirectUri,
+        client_id:     clientId,
+        client_secret: clientSecret,
+      }),
+    });
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenData.id_token) throw new UnauthorizedException('Apple login failed — no id_token');
+
+    // 2. Decode id_token payload (no verify — Apple's public keys would need JWKS fetch)
+    const [, payloadB64] = tokenData.id_token.split('.');
+    const applePayload = JSON.parse(Buffer.from(payloadB64, 'base64').toString()) as any;
+    const appleId      = applePayload.sub as string;  // stable Apple user ID
+
+    // 3. Parse optional user info (only sent on first login)
+    let username: string | null = null;
+    if (rawUser) {
+      try {
+        const u = JSON.parse(rawUser);
+        const name = u?.name;
+        if (name) username = [name.firstName, name.lastName].filter(Boolean).join(' ') || null;
+      } catch { /* ignore */ }
+    }
+    const email = applePayload.email as string | undefined ?? null;
+
+    // 4. Derive deterministic wallet address from Apple sub
+    const walletAddress = `0x${createHash('sha256').update(`apple:${appleId}`).digest('hex').slice(0, 40)}`;
+
+    // 5. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, email)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username = COALESCE(EXCLUDED.username, users.username),
+           email    = COALESCE(EXCLUDED.email,    users.email)`,
+      [walletAddress, username, email],
+    );
+    const rows = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = rows[0];
+
+    // 6. Issue JWT
+    const jti        = uuidv4();
+    const expiresIn  = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+    this.logger.log(`[Apple] JWT issued: appleId=${appleId}, wallet=${walletAddress}`);
+    return {
+      access_token, expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // ── telegramLogin ─────────────────────────────────────────────────────────
+  async telegramLogin(tgData: Record<string, string>): Promise<{
+    access_token: string; expires_in: number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    const botToken = this.config.get('TELEGRAM_BOT_TOKEN', '');
+
+    // 1. Verify Telegram hash
+    const { hash, ...dataWithoutHash } = tgData;
+    const checkArr = Object.keys(dataWithoutHash)
+      .sort()
+      .map(k => `${k}=${dataWithoutHash[k]}`);
+    const checkStr   = checkArr.join('\n');
+    const secretKey  = createHash('sha256').update(botToken).digest();
+    const computed   = createHmac('sha256', secretKey).update(checkStr).digest('hex');
+
+    if (computed !== hash) throw new UnauthorizedException('Telegram auth hash mismatch');
+
+    // 2. Check auth_date (must be within 1 day)
+    const authDate = parseInt(tgData.auth_date, 10);
+    if (Date.now() / 1000 - authDate > 86400) throw new UnauthorizedException('Telegram auth expired');
+
+    const tgId     = tgData.id;
+    const username = tgData.username ?? tgData.first_name ?? null;
+    const avatar   = tgData.photo_url ?? null;
+
+    // 3. Derive deterministic wallet address from Telegram ID
+    const walletAddress = `0x${BigInt(tgId).toString(16).padStart(40, '0')}`;
+
+    // 4. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url)`,
+      [walletAddress, username, avatar],
+    );
+    const rows = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = rows[0];
+
+    // 5. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+    this.logger.log(`[Telegram] JWT issued: tgId=${tgId}, @${username}, wallet=${walletAddress}`);
     return {
       access_token, expires_in: expiresIn,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
