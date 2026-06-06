@@ -37,6 +37,10 @@ export class SocialInteraction {
   @Column({ type: 'text', nullable: true })
   content: string;
 
+  // Rating 1-5 sao — chỉ có ở COMMENT, NULL với LIKE/SHARE/BOOKMARK
+  @Column({ type: 'smallint', nullable: true })
+  rating: number | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   created_at: Date;
 
