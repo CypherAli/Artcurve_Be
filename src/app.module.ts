@@ -36,6 +36,9 @@ import { ModerationModule }         from './modules/moderation/moderation.module
 // ── Health ────────────────────────────────────────────────────────────────────
 import { HealthModule }             from './modules/health/health.module';
 
+// ── Live Streaming ────────────────────────────────────────────────────────────
+import { LiveModule }               from './modules/live/live.module';
+
 // ── Blockchain Pipeline (@Global — merged indexer + consumer) ─────────────────
 import { BlockchainModule }         from './modules/blockchain/blockchain.module';
 
@@ -102,6 +105,9 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
 
     // ⑧ Health checks
     HealthModule,
+
+    // ⑩ Live Streaming
+    LiveModule,
 
     // ⑨ Blockchain Pipeline (merged indexer + consumer)
     BlockchainModule,

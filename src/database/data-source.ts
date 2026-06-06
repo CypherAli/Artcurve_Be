@@ -14,6 +14,7 @@ import { PortfolioHolding } from '../modules/portfolio/entities/portfolio-holdin
 import { Follower } from '../modules/social/entities/follower.entity';
 import { SocialInteraction } from '../modules/social/entities/social-interaction.entity';
 import { ModerationLog } from '../modules/artworks/entities/moderation-log.entity';
+import { LiveStream }    from '../modules/live/entities/live-stream.entity';
 
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
@@ -35,6 +36,7 @@ export const dataSourceOptions: DataSourceOptions = {
     Follower,
     SocialInteraction,
     ModerationLog,
+    LiveStream,
   ],
 
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
