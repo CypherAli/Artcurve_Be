@@ -29,7 +29,7 @@ export class LiveController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateStreamDto,
   ) {
-    const hostName = user.username ?? user.wallet_address?.slice(0, 8) ?? 'Artist';
+    const hostName = user.wallet?.slice(0, 8) ?? 'Artist';
     return this.liveService.createStream(user.sub, hostName, dto);
   }
 

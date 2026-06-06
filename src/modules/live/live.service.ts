@@ -37,12 +37,12 @@ export class LiveService {
   }
 
   /** Tạo JWT token cho một participant trong room */
-  private buildToken(
+  private async buildToken(
     roomName:   string,
     identity:   string,
     name:       string,
     canPublish: boolean,
-  ): string {
+  ): Promise<string> {
     const at = new AccessToken(this.apiKey, this.apiSecret, { identity, name });
     at.addGrant({
       roomJoin:       true,
@@ -98,7 +98,7 @@ export class LiveService {
     });
     await this.liveRepo.save(stream);
 
-    const token = this.buildToken(roomName, hostId, hostName, true);
+    const token = await this.buildToken(roomName, hostId, hostName, true);
 
     return {
       roomName,
@@ -118,7 +118,7 @@ export class LiveService {
     });
     if (!stream) throw new NotFoundException('Stream không tồn tại hoặc đã kết thúc.');
 
-    const token = this.buildToken(roomName, viewerId, viewerId, false);
+    const token = await this.buildToken(roomName, viewerId, viewerId, false);
     return { token, liveKitUrl: this.serverUrl, stream };
   }
 
