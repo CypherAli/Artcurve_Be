@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "ARTCURVE — Fractionalized Art Trading DApp Backend (NestJS + TypeORM + PostgreSQL)",
   "scripts": {
-    "build": "tsc -p tsconfig.json --skipLibCheck",
+    "build": "tsc -p tsconfig.json --skipLibCheck && npm run copy:assets",
+    "copy:assets": "node -e \"const fs=require('fs'),p=require('path');['shared/clickhouse/schema.sql','shared/curve-engine/curve.proto'].forEach(f=>{const d=p.join('dist',f);fs.mkdirSync(p.dirname(d),{recursive:true});fs.copyFileSync(p.join('src',f),d)})\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",

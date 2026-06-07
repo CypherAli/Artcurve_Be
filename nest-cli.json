@@ -4,7 +4,8 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "assets": [
-      { "include": "shared/clickhouse/schema.sql", "outDir": "dist/shared/clickhouse" }
+      { "include": "shared/clickhouse/schema.sql",     "outDir": "dist/shared/clickhouse" },
+      { "include": "shared/curve-engine/curve.proto",  "outDir": "dist/shared/curve-engine" }
     ],
     "watchAssets": true
   }
