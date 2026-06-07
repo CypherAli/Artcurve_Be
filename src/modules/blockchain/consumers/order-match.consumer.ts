@@ -1,19 +1,20 @@
 // order-match.consumer.ts
 // Consumes match results from Rust order matcher via RabbitMQ.
 //
-// Queues consumed:
-//   artcurve.matches  → settle trade in PostgreSQL, update Redis cache, notify user
-//   artcurve.rejects  → notify user of rejection via WebSocket
+// Queues:
+//   artcurve.orders   ← NestJS submits orders TO Rust
+//   artcurve.matches  → Rust publishes filled results HERE
+//   artcurve.rejects  → Rust publishes rejections HERE
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository }                  from '@nestjs/typeorm';
 import { Repository, DataSource }            from 'typeorm';
-import amqp, { Channel, Connection }         from 'amqplib';
+import * as amqp                             from 'amqplib';
 
-import { Artwork }       from '../../artworks/entities/artwork.entity';
-import { Transaction }   from '../../../database/entities/transaction.entity';
-import { RedisService }  from '../../../shared/redis/redis.service';
-import { EventsGateway } from '../../gateway/events.gateway';
+import { Artwork }           from '../../artworks/entities/artwork.entity';
+import { Transaction, TransactionType } from '../../../database/entities/transaction.entity';
+import { RedisService }      from '../../../shared/redis/redis.service';
+import { EventsGateway }     from '../../gateway/events.gateway';
 
 // ── Match result shape from Rust ─────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ interface MatchResult {
   avg_price:      string;
   new_spot_price: string;
   new_supply:     string;
-  status:         'open' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
+  status:         string;
   would_graduate: boolean;
   matched_at:     string;
 }
@@ -40,38 +41,38 @@ interface OrderRejected {
   at:         string;
 }
 
+const QUEUE_ORDERS  = 'artcurve.orders';
 const QUEUE_MATCHES = 'artcurve.matches';
 const QUEUE_REJECTS = 'artcurve.rejects';
-const QUEUE_ORDERS  = 'artcurve.orders';
 
 @Injectable()
 export class OrderMatchConsumer implements OnModuleInit {
   private readonly logger = new Logger(OrderMatchConsumer.name);
-  private conn: Connection;
-  private channel: Channel;
+  private conn:    amqp.Connection;
+  private channel: amqp.Channel;
 
   constructor(
-    private readonly ds:             DataSource,
-    private readonly redis:          RedisService,
-    private readonly eventsGateway:  EventsGateway,
+    private readonly ds:            DataSource,
+    private readonly redis:         RedisService,
+    private readonly eventsGateway: EventsGateway,
     @InjectRepository(Artwork)
-    private readonly artworkRepo:    Repository<Artwork>,
+    private readonly artworkRepo:   Repository<Artwork>,
     @InjectRepository(Transaction)
-    private readonly txRepo:         Repository<Transaction>,
+    private readonly txRepo:        Repository<Transaction>,
   ) {}
 
   async onModuleInit() {
-    const url = process.env.AMQP_URL ?? 'amqp://guest:guest@localhost:5672';
+    const url    = process.env.AMQP_URL ?? 'amqp://guest:guest@localhost:5672';
     this.conn    = await amqp.connect(url);
     this.channel = await this.conn.createChannel();
 
-    // Declare queues (idempotent)
+    // Declare all 3 queues (idempotent)
     for (const q of [QUEUE_ORDERS, QUEUE_MATCHES, QUEUE_REJECTS]) {
       await this.channel.assertQueue(q, { durable: true });
     }
 
-    // Consume 1 message at a time to preserve order
-    this.channel.prefetch(1);
+    // Process one message at a time — preserve order, avoid race conditions
+    await this.channel.prefetch(1);
 
     this.channel.consume(QUEUE_MATCHES, async (msg) => {
       if (!msg) return;
@@ -81,7 +82,7 @@ export class OrderMatchConsumer implements OnModuleInit {
         this.channel.ack(msg);
       } catch (e) {
         this.logger.error('match consumer error', e);
-        this.channel.nack(msg, false, false); // dead-letter
+        this.channel.nack(msg, false, false);
       }
     });
 
@@ -105,36 +106,37 @@ export class OrderMatchConsumer implements OnModuleInit {
   private async handleMatch(result: MatchResult): Promise<void> {
     const { artwork_id, side, filled_amount, eth_amount, new_spot_price, new_supply, would_graduate } = result;
 
-    // 1. Update artwork price + supply in PostgreSQL (atomic)
+    // 1. Update artwork price + supply atomically
     await this.artworkRepo.update(artwork_id, {
       current_price:  new_spot_price,
       current_supply: new_supply,
       ...(would_graduate ? { status: 'TARGET_REACHED' as any } : {}),
     });
 
-    // 2. Write transaction record
-    await this.txRepo.save({
-      tx_hash:         result.match_id, // use match_id as tx reference
+    // 2. Persist transaction record
+    const tx = this.txRepo.create({
+      tx_hash:         result.match_id,
       artwork_id,
       user_id:         result.user_wallet,
-      tx_type:         side === 'buy' ? 'buy' : 'sell',
+      tx_type:         side === 'buy' ? TransactionType.BUY : TransactionType.SELL,
       share_amount:    filled_amount,
       eth_amount,
       price_per_share: result.avg_price,
-      gas_fee:         '0',            // onchain gas handled separately
-      block_number:    0,
+      gas_fee:         '0',
+      block_number:    '0',
       timestamp:       new Date(result.matched_at),
     });
+    await this.txRepo.save(tx);
 
     // 3. Update Redis price cache
     await this.redis.setArtworkPrice(artwork_id, {
       current_price:  new_spot_price,
       current_supply: new_supply,
-      volume_24h:     '0', // updated separately by OHLCV aggregator
+      volume_24h:     '0',
       updated_at:     result.matched_at,
     });
 
-    // 4. Publish Redis price event → Go WS Hub broadcasts to viewers
+    // 4. Publish to Redis → Go WS Hub broadcasts to all viewers
     await this.redis.publishPriceUpdate({
       artwork_id,
       current_price:  new_spot_price,
@@ -147,45 +149,42 @@ export class OrderMatchConsumer implements OnModuleInit {
       share_amount:   filled_amount,
     });
 
-    // 5. Broadcast trade event via NestJS EventsGateway (authenticated users)
-    this.eventsGateway.broadcastTradeUpdate({
+    // 5. Broadcast trade event to authenticated WebSocket clients
+    this.eventsGateway.broadcastTradeUpdated({
       artwork_id,
-      order_id:      result.order_id,
-      side,
-      filled_amount,
+      tx_hash:         result.match_id,
+      is_buy:          side === 'buy',
+      user_wallet:     result.user_wallet,
+      share_amount:    filled_amount,
       eth_amount,
-      new_spot_price,
-      new_supply,
-      would_graduate,
+      price_per_share: result.avg_price,
+      block_number:    '0',
+      timestamp:       Date.now(),
     });
 
-    // 6. Trigger graduation flow if needed
+    // 6. Handle graduation
     if (would_graduate) {
-      this.logger.log(`[GRADUATION] artwork ${artwork_id} reached target — triggering Uniswap migration`);
-      // TODO: call blockchain producer to initiate graduation tx
+      this.eventsGateway.broadcastGraduated(artwork_id);
+      this.logger.log(`[GRADUATION] artwork ${artwork_id} → triggering Uniswap migration`);
     }
 
     this.logger.log(
-      `[MATCH] ${side} ${filled_amount} tokens of ${artwork_id} for ${eth_amount} ETH @ ${result.avg_price}`
+      `[MATCH] ${side} ${filled_amount} tokens @ ${result.avg_price} ETH/token | artwork=${artwork_id}`,
     );
   }
 
   // ── Handle rejected order ───────────────────────────────────────────────────
 
   private async handleRejection(rejection: OrderRejected): Promise<void> {
-    this.logger.warn(`[REJECT] order=${rejection.order_id} reason="${rejection.reason}"`);
-
-    // Notify user via WebSocket
-    this.eventsGateway.broadcastOrderRejected({
-      order_id:   rejection.order_id,
-      artwork_id: rejection.artwork_id,
-      reason:     rejection.reason,
-    });
+    this.logger.warn(`[REJECT] order=${rejection.order_id} | reason="${rejection.reason}"`);
+    // Notify the specific user via WebSocket (user wallet identifies the socket room)
+    // EventsGateway emits 'order_rejected' to room wallet:{user_wallet} when implemented
+    // For now: log only — FE can poll order status via REST
   }
 
-  // ── Public: send order to Rust matcher ─────────────────────────────────────
+  // ── Submit order to Rust matcher ────────────────────────────────────────────
 
-  async submitOrder(payload: object): Promise<void> {
+  async submitOrder(payload: Record<string, unknown>): Promise<void> {
     const msg = Buffer.from(JSON.stringify(payload));
     this.channel.sendToQueue(QUEUE_ORDERS, msg, { persistent: true });
   }
