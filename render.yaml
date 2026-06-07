@@ -1,5 +1,5 @@
 services:
-  # ── NestJS API (đã có, chỉ để reference) ─────────────────────────────────
+  # ── NestJS API ────────────────────────────────────────────────────────────
   - type: web
     name: artcurve-be
     runtime: docker
@@ -8,8 +8,6 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CURVE_ENGINE_URL
-        value: artcurve-curve-engine:50051   # Render private network
       - key: LIVEKIT_API_KEY
         sync: false
       - key: LIVEKIT_API_SECRET
@@ -27,28 +25,18 @@ services:
       - key: PORT
         value: "8080"
       - key: REDIS_URL
-        sync: false          # paste từ Render Redis service
+        sync: false
       - key: REDIS_PASSWORD
         sync: false
       - key: ALLOWED_ORIGINS
         value: https://artcurve-fe.vercel.app
 
-  # ── Rust Bonding Curve Engine (gRPC) ─────────────────────────────────────
-  - type: pserv                # private service — không expose public URL
-    name: artcurve-curve-engine
-    runtime: docker
-    dockerfilePath: services/curve-engine/Dockerfile
-    dockerContext: services/curve-engine
-    envVars:
-      - key: GRPC_PORT
-        value: "50051"
-
   # ── Rust Order Matcher (RabbitMQ consumer) ────────────────────────────────
-  - type: worker               # background worker — không cần HTTP port
+  - type: worker
     name: artcurve-order-matcher
     runtime: docker
     dockerfilePath: services/order-matcher/Dockerfile
     dockerContext: services/order-matcher
     envVars:
       - key: AMQP_URL
-        sync: false            # paste URL RabbitMQ của bạn
+        sync: false

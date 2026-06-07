@@ -36,6 +36,7 @@ import {
 } from './dto/create-artwork.dto';
 import { CurrentUser, Public } from '../auth/decorators';
 import { ClickHouseService, OhlcvInterval } from '../../shared/clickhouse/clickhouse.service';
+import { CurveEngineService } from '../../shared/curve-engine/curve-engine.service';
 import { User } from '../users/entities/user.entity';
 
 @ApiTags('Artworks')
@@ -45,6 +46,7 @@ export class ArtworksController {
   constructor(
     private readonly artworksService:   ArtworksService,
     private readonly clickHouseService: ClickHouseService,
+    private readonly curveEngine:       CurveEngineService,
   ) {}
 
   // ─── GET /artworks — Marketplace listing ──────────────────────────────────
@@ -115,6 +117,53 @@ export class ArtworksController {
   @ApiResponse({ status: 200, description: 'Platform statistics' })
   async getPlatformStats() {
     return this.artworksService.getPlatformStats();
+  }
+
+  // ─── GET /artworks/:id/quote — Buy/Sell price quote ─────────────────────
+
+  @Get(':id/quote')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Tính giá mua/bán token trước khi submit giao dịch',
+    description: 'Trả về ETH cost (buy) hoặc ETH return (sell) dựa trên bonding curve của artwork.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiQuery({ name: 'action', enum: ['buy', 'sell'], required: true })
+  @ApiQuery({ name: 'amount', type: Number, required: true, description: 'Số token muốn mua/bán' })
+  @ApiResponse({ status: 200, description: 'Quote result' })
+  async getQuote(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('action') action: 'buy' | 'sell',
+    @Query('amount', ParseIntPipe) amount: number,
+  ) {
+    const artwork = await this.artworksService.getArtworkById(id);
+    const params  = this.curveEngine.paramsFromArtwork(artwork);
+    const supply  = parseFloat(artwork.current_supply) || 0;
+    return action === 'sell'
+      ? this.curveEngine.getSellReturn(params, supply, amount)
+      : this.curveEngine.getBuyCost(params, supply, amount);
+  }
+
+  // ─── GET /artworks/:id/curve — Price curve points for chart ──────────────
+
+  @Get(':id/curve')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Lấy điểm vẽ đường cong bonding curve (dùng cho chart preview)',
+    description: 'Trả về mảng {supply, price} để vẽ bonding curve trên FE.',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiQuery({ name: 'points', type: Number, required: false, description: 'Số điểm (mặc định 50, tối đa 500)' })
+  @ApiResponse({ status: 200, description: 'Array of {supply, price}' })
+  async getPriceCurve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('points', new DefaultValuePipe(50), ParseIntPipe) points: number,
+  ) {
+    const artwork = await this.artworksService.getArtworkById(id);
+    const params  = this.curveEngine.paramsFromArtwork(artwork);
+    return this.curveEngine.getPriceCurve(params, points);
   }
 
   // ─── GET /artworks/:id — Artwork detail ───────────────────────────────────
