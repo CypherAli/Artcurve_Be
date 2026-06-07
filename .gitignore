@@ -36,3 +36,21 @@ coverage/
 C:/Temp/
 
 desktop.ini
+
+# ── Go (services/ws-hub) ─────────────────────────────────────────────────────
+services/ws-hub/go.sum
+services/ws-hub/bin/
+services/ws-hub/*.exe
+
+# ── Rust (services/curve-engine + order-matcher) ─────────────────────────────
+services/curve-engine/target/
+services/order-matcher/target/
+services/curve-engine/Cargo.lock
+services/order-matcher/Cargo.lock
+
+# ── Solidity / Foundry (contracts/) ──────────────────────────────────────────
+contracts/lib/
+contracts/cache/
+contracts/broadcast/
+contracts/out/
+contracts/.env

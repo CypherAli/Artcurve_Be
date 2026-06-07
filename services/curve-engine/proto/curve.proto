@@ -1,0 +1,92 @@
+syntax = "proto3";
+package curve;
+
+// ─────────────────────────────────────────────────────────────────
+// ArtCurve Bonding Curve Engine — gRPC contract
+//
+// Supports 3 curve types matching CurveType enum in NestJS:
+//   LINEAR      price = P0 + slope * s
+//   QUADRATIC   price = P0 + slope * s²
+//   EXPONENTIAL price = P0 * e^(k * s)
+//
+// All ETH amounts are string-encoded to preserve decimal precision.
+// ─────────────────────────────────────────────────────────────────
+
+service CurveEngine {
+  // Spot price at current supply
+  rpc GetSpotPrice(SpotPriceRequest) returns (SpotPriceResponse);
+
+  // Cost (ETH) to buy `amount` tokens given current supply
+  rpc GetBuyCost(TradeRequest) returns (TradeResponse);
+
+  // Return (ETH) from selling `amount` tokens given current supply
+  rpc GetSellReturn(TradeRequest) returns (TradeResponse);
+
+  // Estimate full market cap at a target supply
+  rpc GetMarketCap(MarketCapRequest) returns (MarketCapResponse);
+
+  // Batch: calculate multiple prices at once (for chart rendering)
+  rpc GetPriceCurve(PriceCurveRequest) returns (PriceCurveResponse);
+}
+
+enum CurveType {
+  LINEAR      = 0;
+  QUADRATIC   = 1;
+  EXPONENTIAL = 2;
+}
+
+message CurveParams {
+  CurveType curve_type   = 1;
+  string    init_price   = 2; // ETH, e.g. "0.00100000"
+  string    slope        = 3; // curve steepness coefficient
+  string    total_supply = 4; // graduation threshold (e.g. "20000")
+}
+
+message SpotPriceRequest {
+  CurveParams params          = 1;
+  string      current_supply  = 2;
+}
+
+message SpotPriceResponse {
+  string price      = 1; // ETH per token
+  string market_cap = 2; // price * current_supply
+}
+
+message TradeRequest {
+  CurveParams params          = 1;
+  string      current_supply  = 2;
+  string      amount          = 3; // tokens to buy/sell
+}
+
+message TradeResponse {
+  string eth_amount       = 1; // total ETH cost or return
+  string price_per_token  = 2; // average price for this trade
+  string new_supply       = 3; // supply after trade
+  string new_spot_price   = 4; // spot price after trade
+  bool   would_graduate   = 5; // true if new_supply >= total_supply
+}
+
+message MarketCapRequest {
+  CurveParams params = 1;
+  string      supply = 2;
+}
+
+message MarketCapResponse {
+  string market_cap  = 1;
+  string spot_price  = 2;
+  double progress_pct = 3; // supply / total_supply * 100
+}
+
+message PriceCurveRequest {
+  CurveParams params = 1;
+  uint32      points = 2; // number of data points (max 1000)
+}
+
+message PriceCurveResponse {
+  repeated PricePoint points = 1;
+}
+
+message PricePoint {
+  string supply = 1;
+  string price  = 2;
+}

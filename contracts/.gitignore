@@ -1,0 +1,20 @@
+# Foundry build artifacts
+out/
+cache/
+
+# Environment - NEVER commit .env (contains private keys!)
+.env
+
+# Broadcast logs (chứa tx hashes và địa chỉ deploy)
+# Có thể commit nếu muốn track deployment history
+broadcast/*/dry-run/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Node (nếu dùng Hardhat tools)
+node_modules/

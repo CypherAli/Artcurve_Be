@@ -1,0 +1,40 @@
+[package]
+name    = "artcurve-curve-engine"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "curve-engine"
+path = "src/main.rs"
+
+[dependencies]
+# gRPC
+tonic       = "0.11"
+prost       = "0.12"
+
+# Async runtime
+tokio       = { version = "1", features = ["full"] }
+
+# Precise decimal arithmetic (no float rounding errors)
+rust_decimal            = { version = "1", features = ["maths"] }
+rust_decimal_macros     = "1"
+
+# Config & env
+dotenvy     = "0.15"
+
+# Logging
+tracing             = "1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror   = "1"
+anyhow      = "1"
+
+[build-dependencies]
+tonic-build = "0.11"
+
+[profile.release]
+opt-level   = 3
+lto         = true
+codegen-units = 1
+panic       = "abort"     # smaller binary, faster startup

@@ -1,0 +1,5 @@
+ws-hub
+*.exe
+*.test
+.env
+vendor/

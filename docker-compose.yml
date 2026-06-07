@@ -1,11 +1,15 @@
-# ── ArtCurve Infrastructure Services ─────────────────────────────────────────
-# Chay: docker compose up -d
-# Dung: docker compose down
-# Xoa data: docker compose down -v
+# ── ArtCurve Full Stack ───────────────────────────────────────────────────────
+# Start:    docker compose up -d
+# Stop:     docker compose down
+# Wipe all: docker compose down -v
+#
+# Services:
+#   Infrastructure: postgres, redis, clickhouse, rabbitmq
+#   App:            api (NestJS), ws-hub (Go), curve-engine (Rust gRPC), order-matcher (Rust)
 
 services:
 
-  # ── PostgreSQL ────────────────────────────────────────────────────
+  # ── PostgreSQL 16 ─────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: artcurve_postgres
@@ -25,13 +29,13 @@ services:
       retries:  5
 
   # ── Redis 7 ───────────────────────────────────────────────────────────────
-  # Dung cho: Nonce cache, JWT blacklist, Rate limit, Price cache, Pub/Sub
+  # Nonce cache, JWT blacklist, rate limit, price cache, pub/sub
   redis:
     image: redis:7-alpine
     container_name: artcurve_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     command: >
@@ -41,59 +45,59 @@ services:
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout:  5s
+      retries:  5
 
   # ── ClickHouse 24 ─────────────────────────────────────────────────────────
-  # Dung cho: OHLCV candles, trade history analytics, volume dashboard
+  # OHLCV Materialized Views, trade history analytics
   clickhouse:
     image: clickhouse/clickhouse-server:24-alpine
     container_name: artcurve_clickhouse
     restart: unless-stopped
     ports:
-      - "8123:8123"   # HTTP interface (query bang curl/DBeaver)
-      - "9000:9000"   # Native TCP (ClickHouse client)
+      - '8123:8123'   # HTTP (curl / DBeaver)
+      - '9000:9000'   # Native TCP
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./src/database/clickhouse:/docker-entrypoint-initdb.d  # auto-run SQL khi khoi dong
     environment:
-      CLICKHOUSE_DB:       artcurve_analytics
-      CLICKHOUSE_USER:     artcurve
-      CLICKHOUSE_PASSWORD: artcurve_ch_pass
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_DB:                     artcurve_analytics
+      CLICKHOUSE_USER:                   artcurve
+      CLICKHOUSE_PASSWORD:               artcurve_ch_pass
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8123/ping || exit 1']
       interval: 15s
-      timeout: 10s
-      retries: 5
+      timeout:  10s
+      retries:  5
 
   # ── RabbitMQ 3 ────────────────────────────────────────────────────────────
-  # Dung cho: Blockchain event queue, DLQ
+  # Blockchain event queue + order book queue
+  # Management UI: http://localhost:15672  (guest / guest)
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: artcurve_rabbitmq
     restart: unless-stopped
     ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI (http://localhost:15672 guest/guest)
+      - '5672:5672'
+      - '15672:15672'
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 30s
-      timeout: 10s
-      retries: 5
+      timeout:  10s
+      retries:  5
 
-  # ── API Server ────────────────────────────────────────────────────
+  # ── NestJS API ────────────────────────────────────────────────────────────
   api:
     build:
       context: .
@@ -108,6 +112,7 @@ services:
       REDIS_URL:      redis://redis:6379
       CLICKHOUSE_URL: http://clickhouse:8123
       RABBITMQ_URL:   amqp://guest:guest@rabbitmq:5672
+      AMQP_URL:       amqp://guest:guest@rabbitmq:5672
     ports:
       - '3001:3001'
     depends_on:
@@ -117,6 +122,52 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ── Go WebSocket Hub ──────────────────────────────────────────────────────
+  # Native WebSocket server — subscribes Redis pub/sub, broadcasts to clients
+  # Replaces Socket.IO for lower latency at scale
+  ws-hub:
+    build:
+      context: services/ws-hub
+      dockerfile: Dockerfile
+    container_name: artcurve_ws_hub
+    restart: unless-stopped
+    environment:
+      PORT:             8080
+      REDIS_URL:        redis://redis:6379
+      ALLOWED_ORIGINS:  http://localhost:3000,https://artcurve-fe.vercel.app
+    ports:
+      - '8080:8080'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Rust Bonding Curve Engine (gRPC) ─────────────────────────────────────
+  # Price calculations: GetSpotPrice, GetBuyCost, GetSellReturn, GetMarketCap
+  curve-engine:
+    build:
+      context: services/curve-engine
+      dockerfile: Dockerfile
+    container_name: artcurve_curve_engine
+    restart: unless-stopped
+    environment:
+      GRPC_PORT: 50051
+    ports:
+      - '50051:50051'
+
+  # ── Rust Order Matcher ────────────────────────────────────────────────────
+  # Off-chain order book: consumes artcurve.orders, publishes matches/rejects
+  order-matcher:
+    build:
+      context: services/order-matcher
+      dockerfile: Dockerfile
+    container_name: artcurve_order_matcher
+    restart: unless-stopped
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
       rabbitmq:
         condition: service_healthy
 

@@ -1,8 +1,11 @@
-# ArtCurve — Backend API
+# ArtCurve — Backend Monorepo
 
-> Fractionalized Art Trading DApp on Base L2 — NestJS REST + WebSocket + Blockchain Indexer
+> Fractionalized Art Trading DApp on Base L2 — NestJS · Go · Rust · Solidity
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go)](https://go.dev/)
+[![Rust](https://img.shields.io/badge/Rust-1.78-CE412B?logo=rust)](https://www.rust-lang.org/)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8-363636?logo=solidity)](https://soliditylang.org/)
 [![NestJS](https://img.shields.io/badge/NestJS-10.x-E0234E?logo=nestjs)](https://nestjs.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io/)
@@ -81,13 +84,30 @@ ArtCurve Backend is the core API server for a Web3 fractionalized art trading pl
                                         Frontend clients
 ```
 
-### Supporting Microservices (separate repos)
+### Monorepo Structure
+
+```
+Artcurve_BE/
+├── src/                        ← NestJS API (TypeScript)
+├── services/
+│   ├── ws-hub/                 ← Go — Native WebSocket Hub
+│   ├── curve-engine/           ← Rust — gRPC Bonding Curve Engine
+│   └── order-matcher/          ← Rust — Off-chain Order Matcher
+├── contracts/                  ← Solidity — Foundry smart contracts
+│   ├── src/                    ← ArtFactory, BondingCurveAMM, ArtFractionToken
+│   ├── test/                   ← Foundry tests
+│   └── script/                 ← Deploy scripts
+├── docker-compose.yml          ← Full stack (infra + all services)
+└── README.md
+```
 
 | Service | Language | Port | Role |
 |---------|----------|------|------|
-| `artcurve-ws-hub` | Go | 8080 | Native WebSocket hub subscribed to Redis Pub/Sub |
-| `artcurve-curve-engine` | Rust (gRPC) | 50051 | Bonding curve price calculations |
-| `artcurve-order-matcher` | Rust (RabbitMQ) | — | Off-chain order book matching |
+| `src/` (NestJS) | TypeScript | 3001 | REST API, WebSocket gateways, blockchain indexer |
+| `services/ws-hub` | Go | 8080 | Native WebSocket hub subscribed to Redis Pub/Sub |
+| `services/curve-engine` | Rust (gRPC) | 50051 | Bonding curve price calculations |
+| `services/order-matcher` | Rust (RabbitMQ) | — | Off-chain order book matching |
+| `contracts/` | Solidity (Foundry) | — | ArtFactory + BondingCurveAMM on Base L2 |
 
 ---
 
@@ -413,7 +433,7 @@ npm run migration:create -- src/database/migrations/MigrationName
 
 ## Microservices
 
-### artcurve-ws-hub (Go)
+### services/ws-hub (Go)
 
 Native WebSocket server that subscribes to Redis `artwork:price:updated` channel and broadcasts to connected clients. Replaces Socket.IO for lower latency at scale.
 
@@ -429,7 +449,7 @@ Client protocol:
 Env: PORT, REDIS_URL, REDIS_PASSWORD, ALLOWED_ORIGINS
 ```
 
-### artcurve-curve-engine (Rust gRPC)
+### services/curve-engine (Rust gRPC)
 
 Bonding curve price calculation service. Replaces Python price agent.
 
@@ -451,7 +471,7 @@ Curves: LINEAR  P₀ + slope·s
 Env: GRPC_PORT=50051
 ```
 
-### artcurve-order-matcher (Rust)
+### services/order-matcher (Rust)
 
 Off-chain order book for limit orders. Consumes from RabbitMQ `artcurve.orders`, publishes results to `artcurve.matches` / `artcurve.rejects`.
 
@@ -465,6 +485,45 @@ Order types: Market (fill immediately at spot price)
 
 Env: AMQP_URL=amqp://guest:guest@localhost:5672
 ```
+
+---
+
+## Smart Contracts
+
+Located in `contracts/` — built with [Foundry](https://book.getfoundry.sh/).
+
+### Contracts
+
+| Contract | Description |
+|----------|-------------|
+| `ArtFactory.sol` | Factory contract — deploys AMM clone per artwork |
+| `BondingCurveAMM.sol` | Automated Market Maker — bonding curve buy/sell logic |
+| `ArtFractionToken.sol` | ERC-1155 fractionalized art token |
+
+### Commands
+
+```bash
+cd contracts
+
+# Install Foundry (first time)
+curl -L https://foundry.paradigm.xyz | bash && foundryup
+
+# Install dependencies
+forge install
+
+# Run tests
+forge test -vv
+
+# Deploy to Base Sepolia
+forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --verify
+
+# Check deployed addresses
+cat broadcast/Deploy.s.sol/84532/run-latest.json
+```
+
+### Deployed (Base Sepolia — Chain 84532)
+
+See `contracts/broadcast/Deploy.s.sol/84532/run-latest.json` for latest deployed addresses.
 
 ---
 
