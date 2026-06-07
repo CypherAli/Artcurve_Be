@@ -79,6 +79,14 @@ export class Artwork {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  /**
+   * Trực tiếp lưu image URI (ipfs://Qm... hoặc https://...).
+   * Được set khi upload qua POST /artworks/upload.
+   * Dùng để render thumbnail trong marketplace mà không cần fetch IPFS metadata.
+   */
+  @Column({ type: 'text', nullable: true })
+  image_uri: string | null;
+
   @Column({ type: 'text', nullable: true })
   ipfs_metadata_uri: string | null;
 
