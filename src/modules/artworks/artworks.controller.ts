@@ -58,12 +58,12 @@ export class ArtworksController {
       'Dùng partial index idx_artworks_active_price — chỉ scan ACTIVE rows. ' +
       'Hỗ trợ sort theo price | created_at | view_count.',
   })
-  @ApiQuery({ name: 'sortBy', enum: ['price', 'created_at', 'view_count'], required: false })
+  @ApiQuery({ name: 'sortBy', enum: ['price', 'created_at', 'view_count', 'trending'], required: false })
   @ApiQuery({ name: 'page',   type: Number, required: false, example: 1 })
   @ApiQuery({ name: 'limit',  type: Number, required: false, example: 20 })
   @ApiResponse({ status: 200, description: 'Danh sách artworks kèm thông tin creator' })
   async getMarketplace(
-    @Query('sortBy') sortBy: 'price' | 'created_at' | 'view_count' = 'created_at',
+    @Query('sortBy') sortBy: 'price' | 'created_at' | 'view_count' | 'trending' = 'created_at',
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {

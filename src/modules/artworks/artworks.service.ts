@@ -15,7 +15,8 @@ import {
   UpdateArtworkStatusDto,
   SearchArtworksDto,
 } from './dto/create-artwork.dto';
-import { PinataService } from './pinata.service';
+import { PinataService }  from './pinata.service';
+import { RedisService }   from '../../shared/redis/redis.service';
 
 // ── State machine ─────────────────────────────────────────────────────────────
 const VALID_TRANSITIONS: Record<ArtworkStatus, ArtworkStatus[]> = {
@@ -31,6 +32,7 @@ const MARKETPLACE_COLS = [
   'artwork.id',
   'artwork.title',
   'artwork.description',
+  'artwork.image_uri',         // trực tiếp — FE render thumbnail không cần fetch IPFS
   'artwork.ipfs_metadata_uri',
   'artwork.ticker',
   'artwork.category',
@@ -63,6 +65,7 @@ export class ArtworksService {
 
     private readonly dataSource:    DataSource,
     private readonly pinataService: PinataService,
+    private readonly redisService:  RedisService,
   ) {}
 
   // ─── createDraftArtwork ────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ export class ArtworksService {
       creator_id:        creatorId,
       title:             dto.title,
       description:       dto.description    ?? null,
+      image_uri:         dto.image_uri      ?? null,
       ipfs_metadata_uri: dto.ipfs_metadata_uri ?? null,
       target_cap:        dto.target_cap,
       ticker,
@@ -147,10 +151,15 @@ export class ArtworksService {
    * Dùng partial index idx_artworks_active_price.
    */
   async getMarketplace(
-    sortBy: 'price' | 'created_at' | 'view_count' = 'created_at',
+    sortBy: 'price' | 'created_at' | 'view_count' | 'trending' = 'created_at',
     page  = 1,
     limit = 20,
   ): Promise<{ data: Artwork[]; total: number; page: number }> {
+    // trending: lấy top N artwork_id từ Redis leaderboard rồi fetch + sort theo thứ tự đó
+    if (sortBy === 'trending') {
+      return this.getMarketplaceTrending(page, limit);
+    }
+
     const sortCol = {
       price:      'artwork.current_price',
       created_at: 'artwork.created_at',
@@ -166,6 +175,60 @@ export class ArtworksService {
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
+
+    return { data, total, page };
+  }
+
+  /**
+   * Trending: top artwork theo volume 24h từ Redis sorted set.
+   * Redis ZADD đã được cập nhật sau mỗi trade — không cần query DB cho rank.
+   * Với page > 1, offset vào leaderboard Redis, sau đó fetch batch từ PG.
+   */
+  private async getMarketplaceTrending(
+    page:  number,
+    limit: number,
+  ): Promise<{ data: Artwork[]; total: number; page: number }> {
+    const offset = (page - 1) * limit;
+
+    // Lấy top (offset + limit) IDs từ Redis để tính rank chính xác
+    const leaderboard = await this.redisService.getLeaderboard('24h', offset + limit);
+    const pageIds     = leaderboard.slice(offset).map(e => e.artworkId);
+
+    if (!pageIds.length) {
+      // Redis chưa có dữ liệu (cold start) → fallback về created_at
+      const [data, total] = await this.artworkRepo
+        .createQueryBuilder('artwork')
+        .leftJoin('artwork.creator', 'creator')
+        .select([...MARKETPLACE_COLS])
+        .where('artwork.status = :status', { status: ArtworkStatus.ACTIVE })
+        .orderBy('artwork.created_at', 'DESC')
+        .skip(offset)
+        .take(limit)
+        .getManyAndCount();
+      return { data, total, page };
+    }
+
+    // Fetch artworks theo IDs từ leaderboard, giữ thứ tự Redis
+    const artworksMap = new Map<string, Artwork>();
+    const rows = await this.artworkRepo
+      .createQueryBuilder('artwork')
+      .leftJoin('artwork.creator', 'creator')
+      .select([...MARKETPLACE_COLS])
+      .where('artwork.id IN (:...ids) AND artwork.status = :status', {
+        ids:    pageIds,
+        status: ArtworkStatus.ACTIVE,
+      })
+      .getMany();
+
+    rows.forEach(a => artworksMap.set(a.id, a));
+
+    // Sort theo thứ tự leaderboard Redis (volume DESC)
+    const data = pageIds
+      .map(id => artworksMap.get(id))
+      .filter((a): a is Artwork => a !== undefined);
+
+    // Total là toàn bộ leaderboard size (không thể COUNT * vì dùng Redis)
+    const total = leaderboard.length;
 
     return { data, total, page };
   }
@@ -369,24 +432,28 @@ export class ArtworksService {
     file:        Express.Multer.File,
     title:       string,
     description: string = '',
-  ): Promise<{ image_uri: string; metadata_uri: string; gateway_image_url: string }> {
+  ): Promise<{
+    image_uri:         string;   // ipfs:// URI — lưu vào artworks.image_uri
+    metadata_uri:      string;   // ipfs:// URI — lưu vào artworks.ipfs_metadata_uri
+    gateway_image_url: string;   // https:// URL có thể dùng trực tiếp trong <img>
+  }> {
     // Dev fallback khi không có Pinata keys
     if (!this.pinataService.isConfigured) {
-      const mockCid = `Qm${Buffer.from(title).toString('hex').slice(0, 44)}`;
+      const mockCid     = `Qm${Buffer.from(title).toString('hex').slice(0, 44)}`;
       const imageUri    = `ipfs://${mockCid}/image`;
       const metadataUri = `ipfs://${mockCid}/metadata.json`;
       this.logger.warn(`Pinata not configured — returning mock IPFS URIs for "${title}"`);
       return { image_uri: imageUri, metadata_uri: metadataUri, gateway_image_url: '' };
     }
 
-    // 1. Upload ảnh
+    // 1. Upload ảnh — trả về ipfs:// URI
     const imageUri = await this.pinataService.pinFile(
       file.buffer,
       file.originalname,
       file.mimetype,
     );
 
-    // 2. Build và upload ERC-721 metadata
+    // 2. Build ERC-721 metadata JSON và pin lên IPFS
     const metadataUri = await this.pinataService.pinJson(
       {
         name:        title,
@@ -397,6 +464,7 @@ export class ArtworksService {
       `${title} — metadata`,
     );
 
+    // gateway_image_url: https:// URL để FE render <img> trực tiếp
     const gatewayImageUrl = this.pinataService.resolveGatewayUrl(imageUri);
 
     return { image_uri: imageUri, metadata_uri: metadataUri, gateway_image_url: gatewayImageUrl };
