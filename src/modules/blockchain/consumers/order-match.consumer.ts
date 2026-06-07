@@ -48,7 +48,7 @@ const QUEUE_REJECTS = 'artcurve.rejects';
 @Injectable()
 export class OrderMatchConsumer implements OnModuleInit {
   private readonly logger = new Logger(OrderMatchConsumer.name);
-  private conn:    amqp.Connection;
+  private conn:    amqp.ChannelModel;
   private channel: amqp.Channel;
 
   constructor(
@@ -63,7 +63,7 @@ export class OrderMatchConsumer implements OnModuleInit {
 
   async onModuleInit() {
     const url    = process.env.AMQP_URL ?? 'amqp://guest:guest@localhost:5672';
-    this.conn    = await amqp.connect(url);
+    this.conn    = await amqp.connect(url) as amqp.ChannelModel;
     this.channel = await this.conn.createChannel();
 
     // Declare all 3 queues (idempotent)
