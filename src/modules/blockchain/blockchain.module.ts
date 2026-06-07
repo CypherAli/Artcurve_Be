@@ -5,10 +5,14 @@ import { Artwork }          from '../artworks/entities/artwork.entity';
 import { PortfolioHolding } from '../portfolio/entities/portfolio-holding.entity';
 
 // ── Event pipeline (Chain → RabbitMQ → DB) ────────────────────────────────────
-import { IndexerService }             from './indexer/indexer.service';       // viem watcher + catch-up
-import { ProducerService }            from './indexer/producer.service';      // RabbitMQ publisher
-import { RabbitMQBlockchainConsumer } from './consumers/rabbitmq.consumer';   // RabbitMQ subscriber
-import { BlockchainEventConsumer }    from './consumers/event.consumer';      // event processor → DB/Redis/CH
+import { IndexerService }             from './indexer/indexer.service';
+import { ProducerService }            from './indexer/producer.service';
+import { RabbitMQBlockchainConsumer } from './consumers/rabbitmq.consumer';
+import { BlockchainEventConsumer }    from './consumers/event.consumer';
+import { OrderMatchConsumer }         from './consumers/order-match.consumer';
+
+// GatewayModule exported EventsGateway — OrderMatchConsumer needs it for WS broadcast
+import { GatewayModule }             from '../gateway/gateway.module';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  BlockchainModule  —  Blockchain Event Pipeline
@@ -40,17 +44,20 @@ import { BlockchainEventConsumer }    from './consumers/event.consumer';      //
 @Module({
   imports: [
     TypeOrmModule.forFeature([Transaction, Artwork, PortfolioHolding]),
+    GatewayModule,   // provides EventsGateway for OrderMatchConsumer WS broadcast
   ],
   providers: [
-    ProducerService,               // RabbitMQ connection + event publishing
-    IndexerService,                // viem real-time watcher + block catch-up
-    RabbitMQBlockchainConsumer,    // RabbitMQ subscriber → BlockchainEventConsumer
-    BlockchainEventConsumer,       // Writes to PostgreSQL + Redis + ClickHouse
+    ProducerService,
+    IndexerService,
+    RabbitMQBlockchainConsumer,
+    BlockchainEventConsumer,
+    OrderMatchConsumer,   // Rust order-matcher result consumer
   ],
   exports: [
     ProducerService,
     IndexerService,
     BlockchainEventConsumer,
+    OrderMatchConsumer,
   ],
 })
 export class BlockchainModule {}
