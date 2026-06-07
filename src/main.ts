@@ -12,7 +12,8 @@ import { TransformInterceptor }    from './common/interceptors/transform.interce
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
-  const app    = await NestFactory.create(AppModule, { bufferLogs: true })
+  // rawBody: true — cần để verify LiveKit webhook signature (HMAC trên raw bytes)
+  const app    = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true })
   const config = app.get(ConfigService)
 
   const isProd = config.get('NODE_ENV') === 'production'

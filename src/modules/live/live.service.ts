@@ -10,6 +10,7 @@ import { ConfigService }    from '@nestjs/config';
 import {
   AccessToken,
   RoomServiceClient,
+  WebhookReceiver,
   type CreateOptions,
 } from 'livekit-server-sdk';
 
@@ -161,8 +162,64 @@ export class LiveService {
     return { ended: true };
   }
 
-  /** Webhook từ LiveKit: cập nhật viewer_count */
-  async updateViewerCount(roomName: string, count: number) {
+  /** Cập nhật viewer_count trực tiếp */
+  async updateViewerCount(roomName: string, count: number): Promise<void> {
     await this.liveRepo.update({ room_name: roomName }, { viewer_count: count });
+  }
+
+  /**
+   * Xử lý webhook từ LiveKit Cloud.
+   * LiveKit gửi event khi participant join/leave/disconnect.
+   * Xác thực chữ ký để ngăn spoof từ nguồn bên ngoài.
+   *
+   * Event types quan trọng:
+   *   participant_joined  → viewer_count + 1
+   *   participant_left    → viewer_count - 1
+   *   room_finished       → is_live = false, ended_at = now
+   */
+  async handleWebhook(
+    body: Record<string, unknown>,
+    signature: string,
+    rawBody?: Buffer,
+  ): Promise<{ ok: true }> {
+    if (this.apiKey && this.apiSecret && rawBody) {
+      try {
+        const receiver = new WebhookReceiver(this.apiKey, this.apiSecret);
+        await receiver.receive(rawBody.toString(), signature);
+      } catch {
+        // Signature mismatch — log and ignore (không throw để tránh lộ thông tin)
+        this.logger.warn('[LiveKit Webhook] Invalid signature — ignoring');
+        return { ok: true };
+      }
+    }
+
+    const event    = body['event'] as string | undefined;
+    const roomName = (body['room'] as Record<string, unknown>)?.['name'] as string | undefined;
+
+    if (!roomName) return { ok: true };
+
+    if (event === 'participant_joined') {
+      await this.liveRepo
+        .createQueryBuilder()
+        .update()
+        .set({ viewer_count: () => 'viewer_count + 1' })
+        .where('room_name = :roomName AND is_live = true', { roomName })
+        .execute();
+    } else if (event === 'participant_left') {
+      await this.liveRepo
+        .createQueryBuilder()
+        .update()
+        .set({ viewer_count: () => 'GREATEST(viewer_count - 1, 0)' })
+        .where('room_name = :roomName AND is_live = true', { roomName })
+        .execute();
+    } else if (event === 'room_finished') {
+      await this.liveRepo.update(
+        { room_name: roomName },
+        { is_live: false, ended_at: new Date() },
+      );
+      this.logger.log(`[LiveKit Webhook] Room finished: ${roomName}`);
+    }
+
+    return { ok: true };
   }
 }

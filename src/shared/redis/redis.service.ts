@@ -263,10 +263,33 @@ export class RedisService {
   // PUB/SUB — CONSUMER publish, WebSocket Gateway subscribe
   // ════════════════════════════════════════════════════════════════════════════
 
-  /**
-   * [CONSUMER ONLY] Phat tin hieu gia thay doi
-   * WebSocket Gateway lang nghe channel nay va day xuong frontend
-   */
+  // Internal callback registries — nhiều gateway có thể đăng ký mà không bị
+  // double-subscribe trên Redis subscriber client.
+  private readonly priceCallbacks      = new Set<(event: PriceUpdatedEvent) => void>();
+  private readonly graduatedCallbacks  = new Set<(artworkId: string) => void>();
+  private channelListenerRegistered    = false;
+
+  /** Đăng ký lắng nghe Redis message một lần duy nhất, route đến đúng callbacks. */
+  private ensureChannelListener(): void {
+    if (this.channelListenerRegistered) return;
+    this.channelListenerRegistered = true;
+
+    this.sub.on('message', (channel: string, message: string) => {
+      try {
+        if (channel === REDIS_KEYS.CHANNEL_PRICE_UPDATED) {
+          const event: PriceUpdatedEvent = JSON.parse(message);
+          this.priceCallbacks.forEach(cb => cb(event));
+        } else if (channel === REDIS_KEYS.CHANNEL_ARTWORK_GRADUATED) {
+          const { artwork_id } = JSON.parse(message) as { artwork_id: string };
+          this.graduatedCallbacks.forEach(cb => cb(artwork_id));
+        }
+      } catch (e) {
+        this.logger.error('Failed to parse Redis pub/sub message', e);
+      }
+    });
+  }
+
+  /** [CONSUMER ONLY] Phát tín hiệu giá thay đổi sau mỗi trade */
   async publishPriceUpdate(event: PriceUpdatedEvent): Promise<void> {
     await this.redis.publish(
       REDIS_KEYS.CHANNEL_PRICE_UPDATED,
@@ -277,28 +300,37 @@ export class RedisService {
     );
   }
 
-  /** [GATEWAY ONLY] Subscribe vao channel gia */
+  /**
+   * [GATEWAY ONLY] Subscribe vào channel giá.
+   * An toàn khi gọi nhiều lần: Redis sub.subscribe() idempotent,
+   * callback được thêm vào Set — không tạo duplicate listener.
+   */
   async subscribePriceUpdates(
     callback: (event: PriceUpdatedEvent) => void,
   ): Promise<void> {
+    this.ensureChannelListener();
+    this.priceCallbacks.add(callback);
     await this.sub.subscribe(REDIS_KEYS.CHANNEL_PRICE_UPDATED);
-
-    this.sub.on('message', (channel: string, message: string) => {
-      if (channel !== REDIS_KEYS.CHANNEL_PRICE_UPDATED) return;
-      try {
-        const event: PriceUpdatedEvent = JSON.parse(message);
-        callback(event);
-      } catch (e) {
-        this.logger.error('Failed to parse price update message', e);
-      }
-    });
   }
 
+  /** [CONSUMER ONLY] Phát tín hiệu artwork đã graduate lên DEX */
   async publishArtworkGraduated(artworkId: string): Promise<void> {
     await this.redis.publish(
       REDIS_KEYS.CHANNEL_ARTWORK_GRADUATED,
       JSON.stringify({ artwork_id: artworkId, timestamp: Date.now() }),
     );
+  }
+
+  /**
+   * [GATEWAY ONLY] Subscribe vào graduation channel.
+   * callback nhận artwork_id khi artwork đạt target cap.
+   */
+  async subscribeArtworkGraduated(
+    callback: (artworkId: string) => void,
+  ): Promise<void> {
+    this.ensureChannelListener();
+    this.graduatedCallbacks.add(callback);
+    await this.sub.subscribe(REDIS_KEYS.CHANNEL_ARTWORK_GRADUATED);
   }
 
   // ════════════════════════════════════════════════════════════════════════════

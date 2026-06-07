@@ -49,6 +49,14 @@ export class CreateArtworkDto {
   description?: string;
 
   @ApiPropertyOptional({
+    description: 'IPFS URI trực tiếp của ảnh gốc — trả về từ POST /artworks/upload',
+    example: 'ipfs://QmXyz.../image.jpg',
+  })
+  @IsOptional()
+  @IsUrl({ protocols: ['ipfs', 'https'] }, { message: 'image_uri phải là URL hợp lệ' })
+  image_uri?: string;
+
+  @ApiPropertyOptional({
     description: 'IPFS URI chứa metadata JSON (có thể upload sau)',
     example: 'ipfs://QmXyz.../metadata.json',
   })

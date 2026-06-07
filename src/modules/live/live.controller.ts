@@ -1,8 +1,9 @@
 import {
   Controller, Post, Get, Delete,
-  Param, Body, Query,
+  Param, Body, Query, Headers, RawBodyRequest, Req,
   HttpCode, HttpStatus,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   ApiTags, ApiOperation, ApiBearerAuth, ApiBody, ApiQuery,
 } from '@nestjs/swagger';
@@ -42,9 +43,10 @@ export class LiveController {
   }
 
   // ── GET /live/:roomName ───────────────────────────────────────────────────
+  // @Public() bắt buộc — LiveViewer.tsx fetch stream info không có JWT
   @Get(':roomName')
   @Public()
-  @ApiOperation({ summary: 'Thông tin 1 stream' })
+  @ApiOperation({ summary: 'Thông tin 1 stream (public)' })
   async getStream(@Param('roomName') roomName: string) {
     return this.liveService.getStream(roomName);
   }
@@ -73,5 +75,21 @@ export class LiveController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.liveService.endStream(roomName, user.sub);
+  }
+
+  // ── POST /live/webhook ────────────────────────────────────────────────────
+  // LiveKit Cloud gọi endpoint này khi participant join/leave để cập nhật viewer_count.
+  // Phải đặt TRƯỚC /:roomName để không bị parse "webhook" làm roomName.
+  // Xác thực bằng webhook signature key để tránh spoof.
+  @Post('webhook')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'LiveKit Cloud webhook — cập nhật viewer count (internal)' })
+  async handleLiveKitWebhook(
+    @Body() body: Record<string, unknown>,
+    @Headers('webhook-signature') signature: string,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    return this.liveService.handleWebhook(body, signature, req.rawBody);
   }
 }
