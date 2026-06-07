@@ -80,14 +80,19 @@ export interface PriceSnapshotEvent {
 
 // ── Gateway ───────────────────────────────────────────────────────────────────
 
-@UseGuards(Web3AuthGuard)                  // JWT guard cho toàn bộ gateway
+const EVENTS_CORS_ORIGINS = [
+  process.env.FRONTEND_URL ?? 'https://artcurve-fe.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+].filter(Boolean);
+
+@UseGuards(Web3AuthGuard)
 @WebSocketGateway({
-  namespace:   '/events',                  // Tách namespace riêng với /prices cũ
+  namespace:    '/events',
   cors: {
-    origin:      process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    origin:      EVENTS_CORS_ORIGINS,
     credentials: true,
   },
-  // pingInterval / pingTimeout — giữ connection sống
   pingInterval: 25_000,
   pingTimeout:  10_000,
 })
@@ -122,7 +127,10 @@ export class EventsGateway
    *   Cách này giảm latency ~2ms nhưng cần xử lý reconnect amqp cẩn thận.
    */
   async onModuleInit(): Promise<void> {
-    // Non-blocking: do not await — Redis may be unavailable in dev
+    // Đăng ký nhận price updates qua Redis Pub/Sub.
+    // RedisService dùng Set<callback> nên gọi nhiều lần từ nhiều gateway không tạo duplicate.
+    // EventsGateway broadcast trade_updated đến /events namespace (JWT clients).
+    // PriceGateway broadcast price_update đến /prices namespace (public).
     this.redisService.subscribePriceUpdates((event) => {
       this.broadcastTradeUpdated({
         artwork_id:      event.artwork_id,
@@ -138,7 +146,7 @@ export class EventsGateway
     }).then(() => {
       this.logger.log('[EventsGateway] Subscribed to Redis artwork:price:updated');
     }).catch((e) => {
-      this.logger.warn(`[EventsGateway] Redis subscribe skipped: ${e.message}`);
+      this.logger.warn(`[EventsGateway] Redis subscribe skipped: ${(e as Error).message}`);
     });
   }
 

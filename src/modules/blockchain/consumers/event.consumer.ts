@@ -195,19 +195,24 @@ export class BlockchainEventConsumer {
       }
       const creatorId = userRows[0].id;
 
-      // Tìm artwork DRAFT gần nhất của creator chưa được map
+      // Tìm artwork DRAFT hoặc AI_MODERATING gần nhất chưa được map.
+      // AI_MODERATING: creator đã submit moderation trước khi deploy on-chain.
+      // DRAFT:         creator deploy on-chain trước khi submit moderation.
+      // Cả hai đều hợp lệ — chỉ cần chưa có amm_address.
       const artworkRows = await qr.manager.query(
         `SELECT id FROM artworks
          WHERE creator_id = $1
-           AND status = $2
+           AND status IN ($2, $3)
            AND amm_address IS NULL
          ORDER BY created_at DESC
          LIMIT 1`,
-        [creatorId, ArtworkStatus.DRAFT],
+        [creatorId, ArtworkStatus.DRAFT, ArtworkStatus.AI_MODERATING],
       );
 
       if (!artworkRows.length) {
-        throw new Error(`No pending DRAFT artwork for creator ${creator}`);
+        throw new Error(
+          `No pending DRAFT/AI_MODERATING artwork for creator ${creator}`,
+        );
       }
       const artworkId = artworkRows[0].id;
 

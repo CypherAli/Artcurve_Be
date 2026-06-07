@@ -28,10 +28,17 @@ import { RedisService, PriceUpdatedEvent } from '../../shared/redis/redis.servic
  *   socket.on('price_update', (data) => updateChart(data))
  *   socket.emit('unsubscribe_artwork', { artwork_id: 'uuid' })
  */
+// Tách ra ngoài decorator để TypeScript không phàn nàn về expression in decorator
+const PRICES_CORS_ORIGINS = [
+  process.env.FRONTEND_URL ?? 'https://artcurve-fe.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+].filter(Boolean);
+
 @WebSocketGateway({
   namespace:   '/prices',
   cors: {
-    origin:      process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    origin:      PRICES_CORS_ORIGINS,
     credentials: true,
   },
 })
@@ -60,18 +67,24 @@ export class PriceGateway
   }
 
   /**
-   * onModuleInit: bat dau lang nghe Redis Pub/Sub ngay khi module khoi dong.
-   * Moi khi RabbitMQ Consumer publish gia moi, ham nay nhan tin
-   * va BROADCAST toi tat ca client dang subscribe artwork do.
+   * onModuleInit: đăng ký hai Redis channels ngay khi gateway khởi động.
+   *   - artwork:price:updated  → broadcastPriceUpdate (trade xảy ra)
+   *   - artwork:graduated      → broadcastGraduated   (đạt target cap)
+   *
+   * Non-blocking: Redis có thể chưa sẵn sàng trong dev environment.
    */
   async onModuleInit(): Promise<void> {
-    // Non-blocking: do not await — Redis may be unavailable in dev
-    this.redisService.subscribePriceUpdates(
-      (event: PriceUpdatedEvent) => this.broadcastPriceUpdate(event),
-    ).then(() => {
-      this.logger.log('Subscribed to Redis price channel');
+    Promise.all([
+      this.redisService.subscribePriceUpdates(
+        (event: PriceUpdatedEvent) => this.broadcastPriceUpdate(event),
+      ),
+      this.redisService.subscribeArtworkGraduated(
+        (artworkId: string) => this.broadcastGraduated(artworkId),
+      ),
+    ]).then(() => {
+      this.logger.log('Subscribed to Redis price and graduation channels');
     }).catch((e) => {
-      this.logger.warn(`Redis subscribe skipped: ${e.message}`);
+      this.logger.warn(`Redis subscribe skipped: ${(e as Error).message}`);
     });
   }
 
