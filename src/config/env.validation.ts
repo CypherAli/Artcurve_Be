@@ -126,7 +126,11 @@ export const envValidationSchema = Joi.object({
   // ── [12] Internal Security ─────────────────────────────────────────────────
   INTERNAL_SERVICE_KEY: Joi.string().allow('').default('change_me_to_random_secret'),
 
-  // ── [13] LiveKit — Real-time streaming ────────────────────────────────────
+  // ── [13] Curve Engine gRPC ────────────────────────────────────────────────
+  // host:port of Rust Curve Engine gRPC service (default local dev)
+  CURVE_ENGINE_URL: Joi.string().default('localhost:50051'),
+
+  // ── [14] LiveKit — Real-time streaming ────────────────────────────────────
   // Lấy tại: https://cloud.livekit.io → Settings → API Keys
   LIVEKIT_API_KEY:    Joi.string().allow('').default(''),
   LIVEKIT_API_SECRET: Joi.string().allow('').default(''),
