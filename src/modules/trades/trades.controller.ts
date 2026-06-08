@@ -14,9 +14,10 @@ import {
   ApiParam,
   ApiQuery,
   ApiResponse,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { TradesService } from './trades.service';
-import { Public } from '../auth/decorators';
+import { Public, CurrentUser } from '../auth/decorators';
 import type { OhlcvTimeframe } from '../../shared/clickhouse/clickhouse-infra.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ import type { OhlcvTimeframe } from '../../shared/clickhouse/clickhouse-infra.se
 // ─────────────────────────────────────────────────────────────────────────────
 
 @ApiTags('Trades — History & Chart Data')
+@ApiBearerAuth('JWT-auth')
 @Controller('trades')
 export class TradesController {
   constructor(private readonly tradesService: TradesService) {}
@@ -67,6 +69,45 @@ export class TradesController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
     return this.tradesService.getTopByVolume(Math.min(limit, 100));
+  }
+
+  // ── GET /trades/me/history ────────────────────────────────────────────────
+  // PHẢI đặt TRƯỚC /:artworkId/* để "me" không bị parse thành artworkId.
+
+  @Get('me/history')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Lịch sử giao dịch của user đang đăng nhập',
+    description:
+      'Query PostgreSQL transactions table WHERE user_id = currentUser. ' +
+      'Trả về danh sách kèm artwork info, sorted DESC theo timestamp. ' +
+      'Yêu cầu JWT Bearer token.',
+  })
+  @ApiQuery({ name: 'page',  type: Number, required: false, example: 1 })
+  @ApiQuery({ name: 'limit', type: Number, required: false, example: 20 })
+  @ApiResponse({
+    status: 200,
+    description: 'Lịch sử giao dịch của user có phân trang',
+    schema: {
+      example: {
+        data: [],
+        total: 0,
+        page: 1,
+        totalPages: 0,
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Chưa đăng nhập' })
+  async getMyTransactionHistory(
+    @CurrentUser() user: { sub: string },
+    @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.tradesService.getUserTransactionHistory(
+      user.sub,
+      page,
+      Math.min(limit, 100),
+    );
   }
 
   // ── GET /trades/:artworkId/ohlcv ──────────────────────────────────────────
@@ -112,18 +153,29 @@ export class TradesController {
     description:
       'Query trực tiếp bảng trades trong ClickHouse. ' +
       'Chỉ dùng cho trang detail artwork — không dùng cho chart. ' +
-      'Pagination bằng limit + offset (TODO: upgrade cursor-based).',
+      'Trả về pagination wrapper { data, total, page, limit } — consistent với /artworks/:id/history.',
   })
   @ApiParam({ name: 'artworkId', description: 'UUID artwork' })
-  @ApiQuery({ name: 'limit',  type: Number, required: false, description: 'Số records (default 50, max 200)' })
-  @ApiQuery({ name: 'offset', type: Number, required: false })
-  @ApiResponse({ status: 200, description: 'Mảng giao dịch sorted DESC theo timestamp' })
+  @ApiQuery({ name: 'page',  type: Number, required: false, description: 'Trang (default 1)' })
+  @ApiQuery({ name: 'limit', type: Number, required: false, description: 'Số records mỗi trang (default 50, max 200)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lịch sử giao dịch có phân trang',
+    schema: {
+      example: {
+        data: [],
+        total: 0,
+        page: 1,
+        limit: 50,
+      },
+    },
+  })
   async getHistory(
-    @Param('artworkId')                     artworkId: string,
-    @Query('limit',  new DefaultValuePipe(50),  ParseIntPipe) limit:  number,
-    @Query('offset', new DefaultValuePipe(0),   ParseIntPipe) offset: number,
+    @Param('artworkId')                      artworkId: string,
+    @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
   ) {
-    return this.tradesService.getTradeHistory(artworkId, Math.min(limit, 200), offset);
+    return this.tradesService.getTradeHistoryPaginated(artworkId, page, Math.min(limit, 200));
   }
 
   // ── GET /trades/:artworkId/volume ─────────────────────────────────────────

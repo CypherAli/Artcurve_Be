@@ -187,6 +187,23 @@ export class InfraClickHouseService {
     return rows;
   }
 
+  /**
+   * Đếm tổng số trade rows của 1 artwork — dùng cho pagination wrapper.
+   */
+  async countTradeHistory(artworkId: string): Promise<number> {
+    const result = await this.ch.query({
+      query: `
+        SELECT count() AS cnt
+        FROM trades
+        WHERE artwork_id = {artwork_id: UUID}
+      `,
+      query_params: { artwork_id: artworkId },
+      format: 'JSONEachRow',
+    });
+    const rows = await result.json<{ cnt: string }>();
+    return parseInt(rows[0]?.cnt ?? '0', 10);
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  WRITE  —  Chỉ Consumer mới được gọi
   // ══════════════════════════════════════════════════════════════════════════
