@@ -9,11 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import {
   createPublicClient,
   http,
+  webSocket,
+  fallback,
   type Address,
   type Log,
   parseAbiItem,
 } from 'viem';
-import { base } from 'viem/chains';
+import { base, baseSepolia } from 'viem/chains';
 import Redis from 'ioredis';
 import { ART_FACTORY_ABI }       from '../../../common/abis/ArtFactory.abi';
 import { BONDING_CURVE_AMM_ABI } from '../../../common/abis/BondingCurveAMM.abi';
@@ -53,7 +55,7 @@ const CATCHUP_CHUNK_SIZE = 2_000n;          // blocks per getLogs request
 const DEFAULT_LOOKBACK   = 1_000n;          // blocks lookback khi chưa có stored block (~33 phút Base)
 
 // Chain map: chainId → viem chain object
-const CHAIN_MAP: Record<number, any> = { 8453: base };
+const CHAIN_MAP: Record<number, any> = { 8453: base, 84532: baseSepolia };
 
 // Parsed ABI items cho getLogs (cần parseAbiItem để type-safe)
 const ARTWORK_CREATED_EVENT = parseAbiItem(
@@ -330,16 +332,25 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
   // ══════════════════════════════════════════════════════════════════════════
 
   private buildClient(): any {
-    const rpcUrl  = this.config.get<string>('RPC_URL',  'https://mainnet.base.org');
-    const chainId = this.config.get<number>('CHAIN_ID', 8453);
+    const rpcUrl  = this.config.get<string>('RPC_URL',    'https://mainnet.base.org');
+    const wsUrl   = this.config.get<string>('WS_RPC_URL', '');
+    const chainId = this.config.get<number>('CHAIN_ID',   8453);
     const chain   = CHAIN_MAP[chainId] ?? base;
 
     this.logger.log(`[Indexer] RPC: ${rpcUrl} (chainId=${chainId})`);
 
-    return createPublicClient({
-      chain,
-      transport: http(rpcUrl, { retryCount: 5, retryDelay: 2_000, timeout: 30_000 }),
-    });
+    // WebSocket transport: watchContractEvent uses eth_subscribe (no polling, no filter expiry)
+    // HTTP fallback: used for getLogs catch-up and if WS unavailable
+    const transport = wsUrl
+      ? fallback([
+          webSocket(wsUrl, { retryCount: 5, retryDelay: 2_000 }),
+          http(rpcUrl,     { retryCount: 5, retryDelay: 2_000, timeout: 30_000 }),
+        ])
+      : http(rpcUrl, { retryCount: 5, retryDelay: 2_000, timeout: 30_000 });
+
+    if (wsUrl) this.logger.log(`[Indexer] WebSocket transport active: ${wsUrl.split('/v2/')[0]}/v2/***`);
+
+    return createPublicClient({ chain, transport });
   }
 
   private resolveFactoryAddress(): Address | null {
