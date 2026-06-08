@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength, IsUrl, Matches } from 'class-validator';
+import { IsOptional, IsString, MaxLength, IsUrl, Matches, IsIn } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfileDto {
@@ -42,4 +42,16 @@ export class UpdateProfileDto {
     message: 'twitter_handle chỉ được chứa chữ, số, underscore',
   })
   twitter_handle?: string;
+
+  @ApiPropertyOptional({
+    description: 'Ngôn ngữ giao diện (BCP-47 locale code)',
+    example: 'en',
+    enum: ['en', 'vi', 'fr', 'ja', 'es', 'zh', 'ko', 'de', 'ar', 'pt'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['en', 'vi', 'fr', 'ja', 'es', 'zh', 'ko', 'de', 'ar', 'pt'], {
+    message: 'language không hợp lệ',
+  })
+  language?: string;
 }

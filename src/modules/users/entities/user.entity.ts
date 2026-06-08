@@ -55,6 +55,9 @@ export class User {
   @Column({ type: 'text', default: UserRole.USER, nullable: false })
   role: string;
 
+  @Column({ type: 'varchar', length: 10, default: 'en', nullable: false })
+  language: string;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   created_at: Date;
 
