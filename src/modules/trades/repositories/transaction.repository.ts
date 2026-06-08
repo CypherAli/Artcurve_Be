@@ -23,7 +23,7 @@ export class TransactionRepository {
         'tx.id', 'tx.tx_type', 'tx.share_amount', 'tx.eth_amount',
         'tx.price_per_share', 'tx.timestamp',
         'user.wallet_address', 'user.username', 'user.avatar_url',
-        'artwork.id', 'artwork.title', 'artwork.ticker', 'artwork.ipfs_metadata_uri',
+        'artwork.id', 'artwork.title', 'artwork.ticker', 'artwork.image_uri', 'artwork.ipfs_metadata_uri',
       ])
       .orderBy('tx.timestamp', 'DESC')
       .limit(take)
