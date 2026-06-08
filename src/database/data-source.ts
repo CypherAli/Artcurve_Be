@@ -3,30 +3,35 @@ import { DataSource, DataSourceOptions } from 'typeorm';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 
-// Load .env từ root project
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Import từng entity từ vị trí mới trong các module
-import { User } from '../modules/users/entities/user.entity';
-import { Artwork } from '../modules/artworks/entities/artwork.entity';
-import { Transaction } from '../modules/trades/entities/transaction.entity';
-import { PortfolioHolding } from '../modules/portfolio/entities/portfolio-holding.entity';
-import { Follower } from '../modules/social/entities/follower.entity';
-import { SocialInteraction } from '../modules/social/entities/social-interaction.entity';
-import { ModerationLog } from '../modules/artworks/entities/moderation-log.entity';
-import { LiveStream }    from '../modules/live/entities/live-stream.entity';
+import { User }               from '../modules/users/entities/user.entity';
+import { Artwork }            from '../modules/artworks/entities/artwork.entity';
+import { Transaction }        from '../modules/trades/entities/transaction.entity';
+import { PortfolioHolding }   from '../modules/portfolio/entities/portfolio-holding.entity';
+import { Follower }           from '../modules/social/entities/follower.entity';
+import { SocialInteraction }  from '../modules/social/entities/social-interaction.entity';
+import { ModerationLog }      from '../modules/artworks/entities/moderation-log.entity';
+import { LiveStream }         from '../modules/live/entities/live-stream.entity';
+
+const isProduction = process.env.NODE_ENV === 'production';
+const databaseUrl  = process.env.DATABASE_URL;
+
+const connectionConfig = databaseUrl
+  ? { url: databaseUrl }
+  : {
+      host:     process.env.DB_HOST     || 'localhost',
+      port:     parseInt(process.env.DB_PORT || '5432', 10),
+      username: process.env.DB_USERNAME || 'postgres',
+      password: process.env.DB_PASSWORD || 'postgres',
+      database: process.env.DB_NAME     || 'artcurve_db',
+    };
 
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  username: process.env.DB_USERNAME || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  database: process.env.DB_NAME || 'artcurve_db',
+  ...connectionConfig,
 
-  ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: isProduction ? { rejectUnauthorized: false } : false,
 
   entities: [
     User,
@@ -50,7 +55,7 @@ export const dataSourceOptions: DataSourceOptions = {
     statement_timeout: 30000,
   },
 
-  logging: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+  logging: isProduction ? ['error'] : ['query', 'error'],
 };
 
 // TypeORM CLI yêu cầu đúng 1 export DataSource duy nhất
