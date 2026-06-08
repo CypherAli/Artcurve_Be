@@ -480,6 +480,84 @@ export class AuthService {
     };
   }
 
+  // ── googleLogin ──────────────────────────────────────────────────────────
+  async googleLogin(code: string, redirectUri: string): Promise<{
+    access_token: string;
+    expires_in:   number;
+    user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
+  }> {
+    // 1. Exchange code → Google access token
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id:     this.config.get('GOOGLE_CLIENT_ID', ''),
+        client_secret: this.config.get('GOOGLE_CLIENT_SECRET', ''),
+        redirect_uri:  redirectUri,
+        grant_type:    'authorization_code',
+      }),
+    });
+
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenData.access_token) {
+      this.logger.error(`[Google] Token exchange failed: ${JSON.stringify(tokenData)}`);
+      throw new UnauthorizedException('Google OAuth thất bại — không lấy được access token');
+    }
+
+    // 2. Lấy thông tin user từ Google
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = await profileRes.json() as any;
+
+    if (!profile.sub) {
+      throw new UnauthorizedException('Google OAuth thất bại — không lấy được user info');
+    }
+
+    // 3. Derive deterministic wallet address từ Google sub (unique numeric-like ID)
+    //    sub là string số — dùng BigInt để convert sang hex 40 chars
+    let walletAddress: string;
+    try {
+      walletAddress = `0x${BigInt(profile.sub).toString(16).padStart(40, '0')}`;
+    } catch {
+      // sub không phải số thuần — fallback sha256
+      const hash = createHash('sha256').update(profile.sub).digest('hex');
+      walletAddress = `0x${hash.slice(0, 40)}`;
+    }
+
+    // 4. Upsert user
+    await this.dataSource.query(
+      `INSERT INTO users (wallet_address, username, avatar_url, email)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (wallet_address) DO UPDATE
+       SET username   = COALESCE(EXCLUDED.username,   users.username),
+           avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+           email      = COALESCE(EXCLUDED.email,      users.email)`,
+      [walletAddress, profile.name ?? profile.given_name ?? null, profile.picture ?? null, profile.email ?? null],
+    );
+
+    const rows = await this.dataSource.query(
+      `SELECT id, wallet_address, username, avatar_url, role, is_verified FROM users WHERE wallet_address = $1`,
+      [walletAddress],
+    );
+    const user = rows[0];
+
+    // 5. Issue JWT
+    const jti       = uuidv4();
+    const expiresIn = 7 * 24 * 3600;
+    const access_token = this.jwtService.sign(
+      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
+      { expiresIn },
+    );
+
+    this.logger.log(`[Google] JWT issued: email=${profile.email}, wallet=${walletAddress}`);
+    return {
+      access_token, expires_in: expiresIn,
+      user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
   // ── logout ─────────────────────────────────────────────────────────────────
   /**
    * Thu hồi JWT — ghi jti vào Redis blacklist.

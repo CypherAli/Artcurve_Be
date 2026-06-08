@@ -90,6 +90,78 @@ export class AuthController {
     );
   }
 
+  // ── GET /auth/google ──────────────────────────────────────────────────────
+
+  @Get('google')
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Google OAuth 2.0 — redirect to Google consent screen' })
+  async googleRedirect(@Res() res: Response) {
+    const clientId = this.config.get<string>('GOOGLE_CLIENT_ID', '');
+    if (!clientId) {
+      this.logger.error('[Google] GOOGLE_CLIENT_ID not configured');
+      return res.redirect(`${safeFrontendUrl(this.config)}/?auth_error=google_not_configured`);
+    }
+
+    // CSRF state — lưu vào Redis 10 phút
+    const state      = randomBytes(32).toString('hex');
+    await this.redisService.setTemp(`oauth_state_google:${state}`, '1', 600);
+
+    const backendUrl = this.config.get<string>('APP_URI', 'https://artcurve-be.onrender.com');
+    const callback   = `${backendUrl}/api/v1/auth/google/callback`;
+
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id',     clientId);
+    url.searchParams.set('redirect_uri',  callback);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope',         'openid email profile');
+    url.searchParams.set('state',         state);
+    url.searchParams.set('access_type',   'online');
+    url.searchParams.set('prompt',        'select_account');
+
+    res.redirect(url.toString());
+  }
+
+  // ── GET /auth/google/callback ──────────────────────────────────────────────
+
+  @Get('google/callback')
+  @Public()
+  @ApiOperation({ summary: 'Google OAuth 2.0 — callback & issue JWT' })
+  async googleCallback(
+    @Query('code')  code:  string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = safeFrontendUrl(this.config);
+    try {
+      // Verify CSRF state
+      if (!state) throw new UnauthorizedException('Missing OAuth state parameter');
+      const stored = await this.redisService.getTemp(`oauth_state_google:${state}`);
+      if (!stored) throw new UnauthorizedException('Invalid or expired OAuth state (possible CSRF)');
+      await this.redisService.deleteTemp(`oauth_state_google:${state}`);
+
+      if (!code) throw new BadRequestException('Missing code parameter');
+
+      const backendUrl    = this.config.get<string>('APP_URI', 'https://artcurve-be.onrender.com');
+      const redirectUri   = `${backendUrl}/api/v1/auth/google/callback`;
+      const result        = await this.authService.googleLogin(code, redirectUri);
+
+      const params = new URLSearchParams({
+        token:    result.access_token,
+        address:  result.user.wallet_address,
+        name:     result.user.username  ?? '',
+        avatar:   result.user.avatar_url ?? '',
+        provider: 'google',
+      });
+      const redirectUrl = new URL('/auth/callback', frontendUrl);
+      redirectUrl.search = params.toString();
+      res.redirect(redirectUrl.toString());
+    } catch (err) {
+      this.logger.error(`[Google] Callback error: ${err instanceof Error ? err.message : err}`);
+      res.redirect(`${frontendUrl}/?auth_error=google_failed`);
+    }
+  }
+
   // ── GET /auth/github ──────────────────────────────────────────────────────
 
   @Get('github')
