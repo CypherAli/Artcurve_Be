@@ -5,17 +5,29 @@ import { REDIS_CLIENT, REDIS_SUBSCRIBER } from './redis.constants';
 import { RedisService } from './redis.service';
 
 function makeRedisClient(config: ConfigService, name: string): Redis {
-  const client = new Redis({
-    host:               config.get('REDIS_HOST', 'localhost'),
-    port:               config.get<number>('REDIS_PORT', 6379),
-    password:           config.get('REDIS_PASSWORD') || undefined,
-    db:                 0,
-    maxRetriesPerRequest: null,   // never throw — queue forever
-    enableReadyCheck:   false,    // don't block on READY
-    enableOfflineQueue: true,     // queue cmds while disconnected
-    lazyConnect:        true,     // don't connect until first command
-    retryStrategy:      (times) => Math.min(times * 1000, 15_000),
-  })
+  const url = config.get<string>('REDIS_URL');
+  const client = url
+    // REDIS_URL present (e.g. Upstash rediss://) — ioredis parses URL + TLS automatically
+    ? new Redis(url, {
+        maxRetriesPerRequest: null,
+        enableReadyCheck:   false,
+        enableOfflineQueue: true,
+        lazyConnect:        true,
+        retryStrategy:      (times) => Math.min(times * 1000, 15_000),
+        tls: url.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+      })
+    // Fallback: separate host/port/password (local dev)
+    : new Redis({
+        host:               config.get('REDIS_HOST', 'localhost'),
+        port:               config.get<number>('REDIS_PORT', 6379),
+        password:           config.get('REDIS_PASSWORD') || undefined,
+        db:                 0,
+        maxRetriesPerRequest: null,
+        enableReadyCheck:   false,
+        enableOfflineQueue: true,
+        lazyConnect:        true,
+        retryStrategy:      (times) => Math.min(times * 1000, 15_000),
+      })
 
   // MUST attach error handler — otherwise Node throws on ECONNREFUSED
   client.on('error',        (e) => console.warn(`[Redis:${name}] error: ${e.message}`))

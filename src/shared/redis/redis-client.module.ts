@@ -33,17 +33,27 @@ export const INFRA_REDIS_CLIENT = 'INFRA_REDIS_CLIENT';
       provide:    INFRA_REDIS_CLIENT,
       inject:     [ConfigService],
       useFactory: (config: ConfigService): Redis => {
-        const client = new Redis({
-          host:         config.get('REDIS_HOST',     'localhost'),
-          port:         config.get<number>('REDIS_PORT', 6379),
-          password:     config.get('REDIS_PASSWORD', undefined),
-          db:           config.get<number>('REDIS_DB', 0),
-          maxRetriesPerRequest: null,
-          enableReadyCheck: false,
-          retryStrategy: (times: number) => Math.min(times * 500, 10_000),
-          connectionName: 'artcurve-infra',
-          lazyConnect: true,
-        });
+        const url = config.get<string>('REDIS_URL');
+        const client = url
+          ? new Redis(url, {
+              maxRetriesPerRequest: null,
+              enableReadyCheck: false,
+              retryStrategy: (times: number) => Math.min(times * 500, 10_000),
+              connectionName: 'artcurve-infra',
+              lazyConnect: true,
+              tls: url.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+            })
+          : new Redis({
+              host:         config.get('REDIS_HOST',     'localhost'),
+              port:         config.get<number>('REDIS_PORT', 6379),
+              password:     config.get('REDIS_PASSWORD', undefined),
+              db:           config.get<number>('REDIS_DB', 0),
+              maxRetriesPerRequest: null,
+              enableReadyCheck: false,
+              retryStrategy: (times: number) => Math.min(times * 500, 10_000),
+              connectionName: 'artcurve-infra',
+              lazyConnect: true,
+            });
 
         // MUST attach error handler — otherwise Node throws on ECONNREFUSED
         client.on('error',        (e) => console.warn('[InfraRedis] error:', e.message));

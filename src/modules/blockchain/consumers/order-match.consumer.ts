@@ -71,7 +71,7 @@ export class OrderMatchConsumer implements OnModuleInit {
   }
 
   private async connect(): Promise<void> {
-    const url = process.env.AMQP_URL ?? 'amqp://guest:guest@localhost:5672';
+    const url = process.env.RABBITMQ_URL ?? process.env.AMQP_URL ?? 'amqp://guest:guest@localhost:5672';
     try {
       this.conn    = await amqp.connect(url) as amqp.ChannelModel;
       this.channel = await this.conn.createChannel();
