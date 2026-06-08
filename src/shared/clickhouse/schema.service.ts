@@ -44,6 +44,10 @@ export class ClickHouseSchemaService implements OnModuleInit {
   async runSchema(): Promise<void> {
     this.logger.log('[ClickHouse] Running schema migration...');
 
+    // Tạo database nếu chưa tồn tại (ClickHouse Cloud không tự tạo)
+    await this.ch.exec({ query: 'CREATE DATABASE IF NOT EXISTS artcurve_analytics' });
+    this.logger.log('[ClickHouse] Database artcurve_analytics ensured');
+
     // Đọc file schema.sql cùng thư mục với file này
     const schemaPath = join(__dirname, 'schema.sql');
     let sql: string;
