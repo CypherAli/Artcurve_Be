@@ -40,6 +40,9 @@ import { HealthModule }             from './modules/health/health.module';
 // ── Live Streaming ────────────────────────────────────────────────────────────
 import { LiveModule }               from './modules/live/live.module';
 
+// ── Notifications (@Global) ───────────────────────────────────────────────────
+import { NotificationsModule }      from './modules/notifications/notifications.module';
+
 // ── Blockchain Pipeline (@Global — merged indexer + consumer) ─────────────────
 import { BlockchainModule }         from './modules/blockchain/blockchain.module';
 
@@ -101,7 +104,10 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     // ⑥ Real-time
     GatewayModule,
 
-    // ⑦ Social + Moderation
+    // ⑦ Notifications (@Global — trước Social để SocialModule có thể inject)
+    NotificationsModule,
+
+    // ⑧ Social + Moderation
     SocialModule,
     ModerationModule,
 

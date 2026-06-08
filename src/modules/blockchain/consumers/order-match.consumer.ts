@@ -17,6 +17,7 @@ import { Transaction, TransactionType }     from '../../trades/entities/transact
 import { PortfolioHolding }                 from '../../portfolio/entities/portfolio-holding.entity';
 import { RedisService }                     from '../../../shared/redis/redis.service';
 import { EventsGateway }                    from '../../gateway/events.gateway';
+import { NotificationsService }             from '../../notifications/notifications.service';
 
 // ── Match result shape from Rust ─────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ export class OrderMatchConsumer implements OnModuleInit {
     private readonly ds:            DataSource,
     private readonly redis:         RedisService,
     private readonly eventsGateway: EventsGateway,
+    private readonly notifSvc:      NotificationsService,
     @InjectRepository(Artwork)
     private readonly artworkRepo:   Repository<Artwork>,
     @InjectRepository(Transaction)
@@ -205,7 +207,21 @@ export class OrderMatchConsumer implements OnModuleInit {
     });
     await this.txRepo.save(tx);
 
-    // 4. Update Redis price cache — accumulate volume from existing cache
+    // 4. Push notification cho user
+    const artwork = await this.artworkRepo.findOne({ where: { id: artwork_id }, select: ['title'] });
+    const artTitle = artwork?.title ?? artwork_id.slice(0, 8);
+    const isBuy    = side === 'buy';
+    const ethAmt   = parseFloat(eth_amount).toFixed(4);
+    const tokenAmt = parseFloat(filled_amount).toFixed(0);
+    this.notifSvc.create({
+      user_id:     userId,
+      type:        'trade',
+      title:       `Lệnh ${isBuy ? 'BUY' : 'SELL'} đã khớp`,
+      description: `${isBuy ? 'Mua' : 'Bán'} ${Number(tokenAmt).toLocaleString()} token — ${artTitle} · ${ethAmt} ETH`,
+      metadata:    { artwork_id, tx_hash: result.match_id, side, eth_amount, filled_amount },
+    }).catch(() => {/* non-blocking */});
+
+    // 5. Update Redis price cache — accumulate volume from existing cache
     const existing = await this.redis.getArtworkPrice(artwork_id);
     const prevVol  = parseFloat(existing?.volume_24h ?? '0');
     const newVol   = (prevVol + parseFloat(eth_amount)).toFixed(18);
@@ -247,6 +263,13 @@ export class OrderMatchConsumer implements OnModuleInit {
     if (would_graduate) {
       this.eventsGateway.broadcastGraduated(artwork_id);
       this.logger.log(`[GRADUATION] artwork ${artwork_id} → triggering Uniswap migration`);
+      this.notifSvc.create({
+        user_id:     userId,
+        type:        'graduation',
+        title:       `"${artTitle}" đã graduate! 🎉`,
+        description: 'Artwork đạt target cap — đang migrate lên Uniswap DEX',
+        metadata:    { artwork_id },
+      }).catch(() => {});
     }
 
     this.logger.log(

@@ -9,6 +9,7 @@ import { Follower }          from '../modules/social/entities/follower.entity';
 import { SocialInteraction } from '../modules/social/entities/social-interaction.entity';
 import { ModerationLog }     from '../modules/artworks/entities/moderation-log.entity';
 import { LiveStream }        from '../modules/live/entities/live-stream.entity';
+import { Notification }     from '../modules/notifications/entities/notification.entity';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { LiveStream }        from '../modules/live/entities/live-stream.entity';
             SocialInteraction,
             ModerationLog,
             LiveStream,
+            Notification,
           ],
 
           migrations: [__dirname + '/migrations/*{.ts,.js}'],

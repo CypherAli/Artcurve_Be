@@ -13,6 +13,7 @@ import { Follower }           from '../modules/social/entities/follower.entity';
 import { SocialInteraction }  from '../modules/social/entities/social-interaction.entity';
 import { ModerationLog }      from '../modules/artworks/entities/moderation-log.entity';
 import { LiveStream }         from '../modules/live/entities/live-stream.entity';
+import { Notification }      from '../modules/notifications/entities/notification.entity';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const databaseUrl  = process.env.DATABASE_URL;
@@ -42,6 +43,7 @@ export const dataSourceOptions: DataSourceOptions = {
     SocialInteraction,
     ModerationLog,
     LiveStream,
+    Notification,
   ],
 
   migrations: [__dirname + '/migrations/*{.ts,.js}'],

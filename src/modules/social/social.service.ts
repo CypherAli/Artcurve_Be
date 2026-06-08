@@ -1,8 +1,9 @@
 import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository }       from 'typeorm'
+import { Repository, DataSource } from 'typeorm'
 import { Follower }         from './entities/follower.entity'
 import { SocialInteraction } from './entities/social-interaction.entity'
+import { NotificationsService } from '../notifications/notifications.service'
 
 @Injectable()
 export class SocialService {
@@ -11,6 +12,8 @@ export class SocialService {
     private readonly followerRepo: Repository<Follower>,
     @InjectRepository(SocialInteraction)
     private readonly interactionRepo: Repository<SocialInteraction>,
+    private readonly notifSvc:  NotificationsService,
+    private readonly ds:        DataSource,
   ) {}
 
   // ── Follow ──────────────────────────────────────────────────────────
@@ -22,6 +25,19 @@ export class SocialService {
     })
     if (existing) throw new ConflictException('Đã follow rồi.')
     await this.followerRepo.save({ follower_id: followerId, following_id: followingId })
+
+    // Gửi thông báo cho người được follow
+    const follower = await this.ds.query(
+      `SELECT username, wallet_address FROM users WHERE id = $1`, [followerId]
+    )
+    const name = follower[0]?.username ?? follower[0]?.wallet_address?.slice(0, 10) ?? 'Someone'
+    this.notifSvc.create({
+      user_id:     followingId,
+      type:        'follow',
+      title:       `${name} đã follow bạn`,
+      description: 'Xem bộ sưu tập của họ',
+      metadata:    { follower_id: followerId },
+    }).catch(() => {})
   }
 
   async unfollow(followerId: string, followingId: string): Promise<void> {
