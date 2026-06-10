@@ -38,7 +38,6 @@ C:/Temp/
 desktop.ini
 
 # ── Go (services/ws-hub) ─────────────────────────────────────────────────────
-services/ws-hub/go.sum
 services/ws-hub/bin/
 services/ws-hub/*.exe
 
