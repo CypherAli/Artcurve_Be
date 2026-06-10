@@ -3,10 +3,9 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# Copy go.mod first; go.sum may not exist locally so we generate it here
-COPY go.mod ./
-# GONOSUMDB=* skips checksum DB lookup (fine for private/new modules)
-RUN GONOSUMDB=* go mod tidy
+# Chuẩn Go Docker: copy go.mod + go.sum trước để cache layer dependencies
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ws-hub .
