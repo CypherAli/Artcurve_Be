@@ -54,14 +54,14 @@ export class Artwork {
 
   // contract_address = AMM clone address (set bởi BlockchainEventConsumer khi ArtworkCreated)
   // Nullable vì DRAFT chưa được deploy
-  @Index('idx_artworks_contract_address', { unique: true, sparse: true })
+  @Index('idx_artworks_contract_address', { unique: true })
   @Column({ type: 'varchar', length: 42, nullable: true, default: null })
   contract_address: string | null;
 
   // amm_address = địa chỉ AMM contract — dùng để map Trade event → artwork UUID
   // Cùng giá trị với contract_address nhưng được set sớm hơn (tại ArtworkCreated event)
   // Index unique để lookup O(1): SELECT id FROM artworks WHERE amm_address = $1
-  @Index('idx_artworks_amm_address', { unique: true, sparse: true })
+  @Index('idx_artworks_amm_address', { unique: true })
   @Column({ type: 'varchar', length: 42, nullable: true, default: null })
   amm_address: string | null;
 
