@@ -1,7 +1,9 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -20,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { UsersService }    from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { WalletNonceDto, LinkWalletDto } from './dto/link-wallet.dto';
 import { CurrentUser, Public } from '../auth/decorators';
 import { User }            from './entities/user.entity';
 
@@ -72,6 +75,61 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Chưa đăng nhập' })
   async updateMe(@CurrentUser() user: User, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(user.id, dto);
+  }
+
+  // ═══ Multi-wallet linking ════════════════════════════════════════════════
+
+  // ─── GET /users/me/wallets ──────────────────────────────────────────────────
+
+  @Get('me/wallets')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Danh sách ví đã liên kết với tài khoản',
+    description: 'Ví primary là ví định danh gốc, không gỡ được. Yêu cầu JWT.',
+  })
+  @ApiResponse({ status: 200, description: 'Danh sách ví' })
+  async listWallets(@CurrentUser() user: User) {
+    return this.usersService.listWallets(user.id);
+  }
+
+  // ─── POST /users/me/wallets/nonce ──────────────────────────────────────────
+
+  @Post('me/wallets/nonce')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Bước 1 liên kết ví: lấy SIWE message để ký',
+    description: 'Ký message bằng VÍ MUỐN LIÊN KẾT (không phải ví đang đăng nhập) để chứng minh sở hữu.',
+  })
+  @ApiResponse({ status: 200, description: '{ nonce, message }' })
+  @ApiResponse({ status: 409, description: 'Ví đã thuộc tài khoản khác' })
+  async getLinkWalletNonce(@CurrentUser() user: User, @Body() dto: WalletNonceDto) {
+    return this.usersService.getLinkWalletNonce(user.id, dto.wallet_address);
+  }
+
+  // ─── POST /users/me/wallets ────────────────────────────────────────────────
+
+  @Post('me/wallets')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Bước 2 liên kết ví: verify chữ ký SIWE và lưu',
+  })
+  @ApiResponse({ status: 201, description: 'Danh sách ví sau khi liên kết' })
+  @ApiResponse({ status: 401, description: 'Chữ ký không hợp lệ / nonce hết hạn' })
+  @ApiResponse({ status: 409, description: 'Ví đã thuộc tài khoản khác' })
+  async linkWallet(@CurrentUser() user: User, @Body() dto: LinkWalletDto) {
+    return this.usersService.linkWallet(user.id, dto);
+  }
+
+  // ─── DELETE /users/me/wallets/:walletAddress ───────────────────────────────
+
+  @Delete('me/wallets/:walletAddress')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gỡ liên kết ví (không gỡ được ví primary)' })
+  @ApiParam({ name: 'walletAddress', example: '0xAbCd1234567890AbCd1234567890AbCd12345678' })
+  @ApiResponse({ status: 200, description: 'Danh sách ví sau khi gỡ' })
+  @ApiResponse({ status: 400, description: 'Không thể gỡ ví primary' })
+  async unlinkWallet(@CurrentUser() user: User, @Param('walletAddress') walletAddress: string) {
+    return this.usersService.unlinkWallet(user.id, walletAddress);
   }
 
   // ─── GET /users/top-creators ───────────────────────────────────────────────

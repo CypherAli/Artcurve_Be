@@ -6,6 +6,7 @@ import * as path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 import { User }               from '../modules/users/entities/user.entity';
+import { UserWallet }         from '../modules/users/entities/user-wallet.entity';
 import { Artwork }            from '../modules/artworks/entities/artwork.entity';
 import { Transaction }        from '../modules/trades/entities/transaction.entity';
 import { PortfolioHolding }   from '../modules/portfolio/entities/portfolio-holding.entity';
@@ -36,6 +37,7 @@ export const dataSourceOptions: DataSourceOptions = {
 
   entities: [
     User,
+    UserWallet,
     Artwork,
     Transaction,
     PortfolioHolding,
