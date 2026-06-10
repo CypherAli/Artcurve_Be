@@ -90,9 +90,13 @@ export class AuthService {
     const nonce       = uuidv4().replace(/-/g, '');  // SiweMessage nonce không có dash
     const chainId     = this.config.get<number>('CHAIN_ID', 8453);
 
-    // Upsert user record (chỉ tạo nếu chưa tồn tại)
+    // Upsert user record — chỉ tạo nếu ví chưa tồn tại VÀ chưa được liên kết
+    // vào tài khoản khác (multi-wallet: ví linked đăng nhập về tài khoản chủ)
     await this.dataSource.query(
-      `INSERT INTO users (wallet_address) VALUES ($1) ON CONFLICT (wallet_address) DO NOTHING`,
+      `INSERT INTO users (wallet_address)
+       SELECT $1::varchar
+       WHERE NOT EXISTS (SELECT 1 FROM user_wallets WHERE wallet_address = $1)
+       ON CONFLICT (wallet_address) DO NOTHING`,
       [normalized],
     );
 
@@ -181,10 +185,18 @@ export class AuthService {
       );
     }
 
-    // 4. Lấy thông tin user từ PostgreSQL
+    // 4. Lấy thông tin user từ PostgreSQL.
+    //    Ưu tiên resolve qua user_wallets (multi-wallet) — ví đã liên kết
+    //    đăng nhập về tài khoản chủ; fallback users.wallet_address (legacy).
     const users = await this.dataSource.query(
-      `SELECT id, wallet_address, username, role, is_verified
-       FROM users WHERE wallet_address = $1`,
+      `SELECT u.id, u.wallet_address, u.username, u.role, u.is_verified
+       FROM users u
+       JOIN user_wallets uw ON uw.user_id = u.id
+       WHERE uw.wallet_address = $1
+       UNION
+       SELECT id, wallet_address, username, role, is_verified
+       FROM users WHERE wallet_address = $1
+       LIMIT 1`,
       [normalized],
     );
 

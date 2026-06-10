@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User }              from '../modules/users/entities/user.entity';
+import { UserWallet }        from '../modules/users/entities/user-wallet.entity';
 import { Artwork }           from '../modules/artworks/entities/artwork.entity';
 import { Transaction }       from '../modules/trades/entities/transaction.entity';
 import { PortfolioHolding }  from '../modules/portfolio/entities/portfolio-holding.entity';
@@ -38,6 +39,7 @@ import { Notification }     from '../modules/notifications/entities/notification
 
           entities: [
             User,
+            UserWallet,
             Artwork,
             Transaction,
             PortfolioHolding,
