@@ -79,39 +79,14 @@ impl CurveSnapshot {
 }
 
 // ── Per-artwork order book ────────────────────────────────────────────────────
-
-pub struct ArtworkBook {
-    pub artwork_id:      Uuid,
-    pub current_supply:  Decimal,
-    pub curve:           CurveSnapshot,
-    // Limit bids: price (desc) → queue of orders
-    bids: BTreeMap<DecimalKey, VecDeque<Order>>,
-    // Limit asks: price (asc) → queue of orders
-    asks: BTreeMap<DecimalKey, VecDeque<Order>>,
-}
-
-/// Wrapper so Decimal can be used as BTreeMap key
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct DecimalKey(ordered_decimal::OrderedDecimal<Decimal>);
-
-impl DecimalKey {
-    fn new(d: Decimal) -> Self {
-        DecimalKey(ordered_decimal::OrderedDecimal(d))
-    }
-    fn value(&self) -> Decimal { self.0.0 }
-}
-
-// Since we can't add ordered_decimal without adding it to Cargo.toml,
-// let's use a simpler approach: store as (mantissa, scale) tuple key
-// Actually, let's use a string-based ordered key for Decimal
-// The cleanest approach: use i128 scaled to 8 decimal places
+// Price key: Decimal scale về 8 chữ số thập phân → i128 (BTreeMap-orderable,
+// không mất precision như đi vòng qua f64)
 
 type PriceKey = i128;
 
 fn to_key(d: Decimal) -> PriceKey {
-    // Scale to 8 decimal places and convert to i128
-    let scaled = d * Decimal::from(100_000_000u64);
-    scaled.to_string().parse::<f64>().unwrap_or(0.0) as i128
+    use rust_decimal::prelude::ToPrimitive;
+    (d * Decimal::from(100_000_000u64)).trunc().to_i128().unwrap_or(0)
 }
 
 pub struct ArtworkBookV2 {
@@ -328,13 +303,14 @@ impl ArtworkBookV2 {
             .collect();
 
         for key in fillable {
-            if let Some(queue) = self.asks.get_mut(&key) {
+            // remove() lấy ownership queue trước — tránh giữ &mut self.asks
+            // trong khi fill_market_sell cần &mut self (E0499)
+            if let Some(mut queue) = self.asks.remove(&key) {
                 while let Some(order) = queue.pop_front() {
                     // Best-effort fill — ignore result for now
                     let _ = self.fill_market_sell(order);
                 }
             }
-            self.asks.remove(&key);
         }
     }
 
@@ -347,12 +323,11 @@ impl ArtworkBookV2 {
             .collect();
 
         for key in fillable {
-            if let Some(queue) = self.bids.get_mut(&key) {
+            if let Some(mut queue) = self.bids.remove(&key) {
                 while let Some(order) = queue.pop_front() {
                     let _ = self.fill_market_buy(order);
                 }
             }
-            self.bids.remove(&key);
         }
     }
 }

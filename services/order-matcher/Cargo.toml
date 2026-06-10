@@ -33,12 +33,13 @@ chrono      = { version = "0.4", features = ["serde"] }
 dotenvy     = "0.15"
 
 # Logging
-tracing             = "1"
+tracing             = "0.1"
 tracing-subscriber  = { version = "0.3", features = ["env-filter", "json"] }
 
 # Error handling
 thiserror   = "1"
 anyhow      = "1"
+futures-lite = "2"
 
 [profile.release]
 opt-level     = 3

@@ -12,6 +12,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -32,18 +33,30 @@ type Subscriber struct {
 }
 
 func New(addr, password string, db int, h *hub.Hub) *Subscriber {
-	rdb := goredis.NewClient(&goredis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Second,
-		// Connection pool — tune based on load
-		PoolSize:    10,
-		MinIdleConns: 2,
-	})
-	return &Subscriber{client: rdb, hub: h}
+	// REDIS_URL có thể là URL đầy đủ (redis:// / rediss:// — Render, Upstash)
+	// hoặc raw "host:port". ParseURL xử lý TLS + password trong URL.
+	var opts *goredis.Options
+	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
+		parsed, err := goredis.ParseURL(addr)
+		if err != nil {
+			log.Fatal().Err(err).Str("url", addr).Msg("invalid REDIS_URL")
+		}
+		opts = parsed
+		if password != "" {
+			opts.Password = password // env REDIS_PASSWORD ghi đè nếu được set riêng
+		}
+	} else {
+		opts = &goredis.Options{Addr: addr, Password: password, DB: db}
+	}
+
+	opts.DialTimeout = 5 * time.Second
+	opts.ReadTimeout = 30 * time.Second
+	opts.WriteTimeout = 5 * time.Second
+	// Connection pool — tune based on load
+	opts.PoolSize = 10
+	opts.MinIdleConns = 2
+
+	return &Subscriber{client: goredis.NewClient(opts), hub: h}
 }
 
 // Run blocks and processes pub/sub messages.

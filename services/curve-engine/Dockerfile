@@ -1,7 +1,8 @@
-FROM rust:1.78-slim AS builder
+FROM rust:1-alpine AS builder
 
-# Install protobuf compiler (needed for tonic/prost code generation)
-RUN apt-get update && apt-get install -y protobuf-compiler libprotobuf-dev && rm -rf /var/lib/apt/lists/*
+# protoc cho tonic/prost codegen; musl-dev cho linker.
+# Alpine (apk) thay Debian (apt) — ổn định hơn trong Docker build.
+RUN apk add --no-cache musl-dev protobuf-dev protoc
 
 WORKDIR /app
 
@@ -16,12 +17,12 @@ COPY src/ src/
 RUN touch src/main.rs && cargo build --release
 
 # ── Runtime stage ─────────────────────────────────────────────────
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# Binary musl static (mặc định của rust alpine target) → distroless/static
+FROM gcr.io/distroless/static-debian12
 WORKDIR /app
 COPY --from=builder /app/target/release/curve-engine .
 
 ENV GRPC_PORT=50051
 EXPOSE 50051
 
-CMD ["./curve-engine"]
+ENTRYPOINT ["/app/curve-engine"]
