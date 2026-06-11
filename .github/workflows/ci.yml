@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # CD: Render tự deploy khi push main (auto-deploy bật sẵn).
+  # Job này hiển thị bước deploy trong tab Actions + đợi BE healthy.
+  deploy:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render auto-deploy đã được trigger bởi push này
+        run: echo "Render đang build & deploy commit ${GITHUB_SHA::7}..."
+
+      - name: Chờ BE production healthy
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 60 \
+              https://artcurve-be.onrender.com/api/v1/health || true)
+            if [ "$code" = "200" ]; then
+              echo "✅ BE production healthy (HTTP 200)"
+              exit 0
+            fi
+            echo "attempt $i/30: HTTP $code — đợi 20s..."
+            sleep 20
+          done
+          echo "❌ BE không healthy sau 10 phút"
+          exit 1
