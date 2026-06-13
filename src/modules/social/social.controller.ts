@@ -8,7 +8,7 @@ import {
 import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max, MaxLength } from 'class-validator'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { SocialService } from './social.service'
-import { CurrentUser }   from '../../common/decorators'
+import { CurrentUser, Public } from '../../common/decorators'
 import { JwtPayload }    from '../auth/auth.service'
 
 // ── DTOs ─────────────────────────────────────────────────────────────
@@ -52,12 +52,14 @@ export class SocialController {
   }
 
   @Get('followers/:userId')
+  @Public()
   @ApiOperation({ summary: 'Danh sách followers của một user' })
   getFollowers(@Param('userId') userId: string) {
     return this.socialService.getFollowers(userId)
   }
 
   @Get('following/:userId')
+  @Public()
   @ApiOperation({ summary: 'Danh sách user đang follow' })
   getFollowing(@Param('userId') userId: string) {
     return this.socialService.getFollowing(userId)
@@ -80,6 +82,7 @@ export class SocialController {
   }
 
   @Get('likes/:artworkId/count')
+  @Public()
   @ApiOperation({ summary: 'Số lượt like của artwork' })
   likeCount(@Param('artworkId') artworkId: string) {
     return this.socialService.getLikeCount(artworkId)
@@ -100,6 +103,7 @@ export class SocialController {
   }
 
   @Get('comments/:artworkId')
+  @Public()
   @ApiOperation({ summary: 'Lấy danh sách reviews của artwork' })
   @ApiQuery({ name: 'page',  required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
@@ -122,6 +126,7 @@ export class SocialController {
   }
 
   @Get('stats/:artworkId')
+  @Public()
   @ApiOperation({ summary: 'Thống kê like + comment + avg_rating của artwork' })
   getStats(@Param('artworkId') artworkId: string) {
     return this.socialService.getArtworkStats(artworkId)
