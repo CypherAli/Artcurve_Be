@@ -1,4 +1,4 @@
-import { Module, Global, OnApplicationShutdown } from '@nestjs/common';
+import { Module, Global, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { REDIS_CLIENT, REDIS_SUBSCRIBER } from './redis.constants';
@@ -30,9 +30,10 @@ function makeRedisClient(config: ConfigService, name: string): Redis {
       })
 
   // MUST attach error handler — otherwise Node throws on ECONNREFUSED
-  client.on('error',        (e) => console.warn(`[Redis:${name}] error: ${e.message}`))
-  client.on('connect',      ()  => console.log(`[Redis:${name}] connected`))
-  client.on('reconnecting', ()  => console.warn(`[Redis:${name}] reconnecting…`))
+  const logger = new Logger(`Redis:${name}`)
+  client.on('error',        (e) => logger.warn(`error: ${e.message}`))
+  client.on('connect',      ()  => logger.log('connected'))
+  client.on('reconnecting', ()  => logger.warn('reconnecting…'))
 
   return client
 }
