@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -55,10 +55,10 @@ export const INFRA_REDIS_CLIENT = 'INFRA_REDIS_CLIENT';
               lazyConnect: true,
             });
 
-        // MUST attach error handler — otherwise Node throws on ECONNREFUSED
-        client.on('error',        (e) => console.warn('[InfraRedis] error:', e.message));
-        client.on('connect',       () => console.log('[InfraRedis] connected'));
-        client.on('reconnecting',  () => console.warn('[InfraRedis] reconnecting…'));
+        const logger = new Logger('InfraRedis');
+        client.on('error',        (e) => logger.warn(`error: ${e.message}`));
+        client.on('connect',       () => logger.log('connected'));
+        client.on('reconnecting',  () => logger.warn('reconnecting…'));
 
         return client;
       },
