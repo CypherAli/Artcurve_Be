@@ -132,15 +132,6 @@ export class ArtworksService {
 
     if (!artwork) throw new NotFoundException(`Artwork ${id} không tồn tại`);
 
-    // Tăng view_count không block response
-    this.artworkRepo
-      .createQueryBuilder()
-      .update()
-      .set({ view_count: () => 'view_count + 1' })
-      .where('id = :id', { id })
-      .execute()
-      .catch(() => {});
-
     return artwork;
   }
 

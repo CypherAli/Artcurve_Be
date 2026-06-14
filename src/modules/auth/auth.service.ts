@@ -513,7 +513,7 @@ export class AuthService {
 
     const tokenData = await tokenRes.json() as any;
     if (!tokenData.access_token) {
-      this.logger.error(`[Google] Token exchange failed: ${JSON.stringify(tokenData)}`);
+      this.logger.error(`[Google] Token exchange failed: status=${tokenRes.status}`);
       throw new UnauthorizedException('Google OAuth thất bại — không lấy được access token');
     }
 
@@ -568,6 +568,48 @@ export class AuthService {
       access_token, expires_in: expiresIn,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
+  }
+
+  // ── One-time auth code (OAuth code exchange) ───────────────────────────────
+  /**
+   * Tạo one-time authorization code, lưu JWT + user info vào Redis (TTL 60s).
+   * Trả về code (UUID) để redirect qua URL thay vì JWT trực tiếp.
+   */
+  async createAuthCode(result: {
+    access_token: string;
+    user: { wallet_address: string; username: string | null; avatar_url: string | null };
+  }, provider: string): Promise<string> {
+    const code = uuidv4();
+    const payload = JSON.stringify({
+      access_token: result.access_token,
+      address:      result.user.wallet_address,
+      name:         result.user.username ?? '',
+      avatar:       result.user.avatar_url ?? '',
+      provider,
+    });
+    await this.redisService.setTemp(`auth_code:${code}`, payload, 60);
+    return code;
+  }
+
+  /**
+   * Consume one-time auth code — trả về JWT + user info, xoá khỏi Redis.
+   * Mỗi code chỉ dùng được 1 lần (atomic get + delete).
+   */
+  async consumeAuthCode(code: string): Promise<{
+    access_token: string;
+    address:      string;
+    name:         string;
+    avatar:       string;
+    provider:     string;
+  }> {
+    const key = `auth_code:${code}`;
+    const raw = await this.redisService.getTemp(key);
+    if (!raw) {
+      throw new UnauthorizedException('Authorization code không hợp lệ hoặc đã hết hạn.');
+    }
+    // Delete immediately — one-time use
+    await this.redisService.deleteTemp(key);
+    return JSON.parse(raw);
   }
 
   // ── logout ─────────────────────────────────────────────────────────────────

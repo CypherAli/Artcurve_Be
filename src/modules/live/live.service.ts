@@ -187,10 +187,14 @@ export class LiveService {
         const receiver = new WebhookReceiver(this.apiKey, this.apiSecret);
         await receiver.receive(rawBody.toString(), signature);
       } catch {
-        // Signature mismatch — log and ignore (không throw để tránh lộ thông tin)
-        this.logger.warn('[LiveKit Webhook] Invalid signature — ignoring');
+        // Signature mismatch — return early WITHOUT processing the event
+        this.logger.warn('[LiveKit Webhook] Invalid signature — rejecting');
         return { ok: true };
       }
+    } else {
+      // No API key/secret or no rawBody — cannot verify, reject
+      this.logger.warn('[LiveKit Webhook] Missing credentials or rawBody — rejecting');
+      return { ok: true };
     }
 
     const event    = body['event'] as string | undefined;

@@ -120,7 +120,7 @@ export class CreateArtworkDto {
   })
   @IsOptional()
   @IsString()
-  @Matches(/^\d+(\.\d{1,2})?$/, { message: 'royalty_pct phải là số 0-10, tối đa 2 chữ số thập phân' })
+  @Matches(/^([0-9](\.\d{1,2})?|10(\.0{1,2})?)$/, { message: 'royalty_pct phải là số 0-10, tối đa 2 chữ số thập phân' })
   royalty_pct?: string;
 
   /**

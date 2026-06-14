@@ -34,12 +34,12 @@ import { randomBytes }    from 'crypto';
 
 // Danh sách frontend URL được phép nhận OAuth redirect — chống Open Redirect
 const ALLOWED_FRONTEND_ORIGINS = new Set([
+  process.env.FRONTEND_URL,
   'https://artcurve-fe.vercel.app',
   'https://artcurve.io',
   'https://www.artcurve.io',
-  'http://localhost:3000',
-  'http://localhost:3001',
-]);
+  ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:3000', 'http://localhost:3001'] : []),
+].filter(Boolean));
 
 function safeFrontendUrl(config: ConfigService): string {
   const url = config.get<string>('FRONTEND_URL', 'https://artcurve-fe.vercel.app').trim();
@@ -146,15 +146,9 @@ export class AuthController {
       const redirectUri   = `${backendUrl}/api/v1/auth/google/callback`;
       const result        = await this.authService.googleLogin(code, redirectUri);
 
-      const params = new URLSearchParams({
-        token:    result.access_token,
-        address:  result.user.wallet_address,
-        name:     result.user.username  ?? '',
-        avatar:   result.user.avatar_url ?? '',
-        provider: 'google',
-      });
+      const authCode = await this.authService.createAuthCode(result, 'google');
       const redirectUrl = new URL('/auth/callback', frontendUrl);
-      redirectUrl.search = params.toString();
+      redirectUrl.searchParams.set('code', authCode);
       res.redirect(redirectUrl.toString());
     } catch (err) {
       this.logger.error(`[Google] Callback error: ${err instanceof Error ? err.message : err}`);
@@ -211,16 +205,9 @@ export class AuthController {
       if (!code) throw new BadRequestException('Missing code parameter');
 
       const result = await this.authService.githubLogin(code);
-      const params = new URLSearchParams({
-        token:    result.access_token,
-        address:  result.user.wallet_address,
-        name:     result.user.username  ?? '',
-        avatar:   result.user.avatar_url ?? '',
-        provider: 'github',
-      });
-      // Dùng URL constructor — không concat string thô
+      const authCode = await this.authService.createAuthCode(result, 'github');
       const redirectUrl = new URL('/auth/callback', frontendUrl);
-      redirectUrl.search = params.toString();
+      redirectUrl.searchParams.set('code', authCode);
       res.redirect(redirectUrl.toString());
     } catch (err) {
       this.logger.error(`[GitHub] Callback error: ${err instanceof Error ? err.message : err}`);
@@ -261,15 +248,9 @@ export class AuthController {
       if (!oauthToken || !oauthVerifier) throw new BadRequestException('Missing OAuth params');
 
       const result = await this.authService.twitterLogin(oauthToken, oauthVerifier);
-      const params = new URLSearchParams({
-        token:    result.access_token,
-        address:  result.user.wallet_address,
-        name:     result.user.username  ?? '',
-        avatar:   result.user.avatar_url ?? '',
-        provider: 'twitter',
-      });
+      const authCode = await this.authService.createAuthCode(result, 'twitter');
       const redirectUrl = new URL('/auth/callback', frontendUrl);
-      redirectUrl.search = params.toString();
+      redirectUrl.searchParams.set('code', authCode);
       res.redirect(redirectUrl.toString());
     } catch (err) {
       this.logger.error(`[Twitter] Callback error: ${err instanceof Error ? err.message : err}`);
@@ -329,20 +310,35 @@ export class AuthController {
       }
 
       const result = await this.authService.telegramLogin(tgData);
-      const params = new URLSearchParams({
-        token:    result.access_token,
-        address:  result.user.wallet_address,
-        name:     result.user.username  ?? '',
-        avatar:   result.user.avatar_url ?? '',
-        provider: 'telegram',
-      });
+      const authCode = await this.authService.createAuthCode(result, 'telegram');
       const redirectUrl = new URL('/auth/callback', frontendUrl);
-      redirectUrl.search = params.toString();
+      redirectUrl.searchParams.set('code', authCode);
       res.redirect(redirectUrl.toString());
     } catch (err) {
       this.logger.error(`[Telegram] Callback error: ${err instanceof Error ? err.message : err}`);
       res.redirect(`${frontendUrl}/?auth_error=telegram_failed`);
     }
+  }
+
+  // ── POST /auth/exchange ─────────────────────────────────────────────────────
+
+  @Post('exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Exchange one-time auth code for JWT (OAuth code flow)' })
+  @ApiResponse({ status: 200, description: 'JWT + user info' })
+  @ApiResponse({ status: 401, description: 'Code không hợp lệ hoặc đã hết hạn' })
+  async exchangeCode(@Body() body: { code: string }) {
+    if (!body.code) throw new BadRequestException('Missing code parameter');
+    const data = await this.authService.consumeAuthCode(body.code);
+    return {
+      access_token: data.access_token,
+      address:      data.address,
+      name:         data.name,
+      avatar:       data.avatar,
+      provider:     data.provider,
+    };
   }
 
   // ── POST /auth/logout ──────────────────────────────────────────────────────

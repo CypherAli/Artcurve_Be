@@ -31,8 +31,9 @@ import { RedisService, PriceUpdatedEvent } from '../../shared/redis/redis.servic
 // Tách ra ngoài decorator để TypeScript không phàn nàn về expression in decorator
 const PRICES_CORS_ORIGINS = [
   process.env.FRONTEND_URL ?? 'https://artcurve-fe.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:3001',
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:3000', 'http://localhost:3001']
+    : []),
 ].filter(Boolean);
 
 @WebSocketGateway({
@@ -143,7 +144,15 @@ export class PriceGateway
    */
   private broadcastPriceUpdate(event: PriceUpdatedEvent): void {
     const room = `artwork:${event.artwork_id}`;
-    this.server.to(room).emit('price_update', event);
+    // Strip sensitive fields — public feed should not expose tx_hash, user_wallet, eth_amount
+    const safePayload = {
+      artwork_id:     event.artwork_id,
+      current_price:  event.current_price,
+      current_supply: event.current_supply,
+      volume_24h:     event.volume_24h,
+      timestamp:      event.timestamp,
+    };
+    this.server.to(room).emit('price_update', safePayload);
     this.logger.debug(
       `Broadcast price=${event.current_price} -> room=${room}`,
     );

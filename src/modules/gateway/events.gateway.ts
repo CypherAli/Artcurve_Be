@@ -82,8 +82,9 @@ export interface PriceSnapshotEvent {
 
 const EVENTS_CORS_ORIGINS = [
   process.env.FRONTEND_URL ?? 'https://artcurve-fe.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:3001',
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:3000', 'http://localhost:3001']
+    : []),
 ].filter(Boolean);
 
 @UseGuards(Web3AuthGuard)

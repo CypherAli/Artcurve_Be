@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
 import { ClickHouseClient } from '@clickhouse/client';
 import { CLICKHOUSE_CLIENT } from './clickhouse.constants';
 
@@ -116,7 +116,18 @@ export class ClickHouseService {
     to: Date,
     limit = 500,
   ): Promise<OhlcvCandle[]> {
-    const table = `ohlcv_${interval}`;
+    // Whitelist validation — chống SQL injection qua table name interpolation
+    const ALLOWED_INTERVALS: Record<string, string> = {
+      '1m': 'ohlcv_1m',
+      '5m': 'ohlcv_5m',
+      '1h': 'ohlcv_1h',
+    };
+    const table = ALLOWED_INTERVALS[interval];
+    if (!table) {
+      throw new BadRequestException(
+        `Invalid interval "${interval}". Allowed: ${Object.keys(ALLOWED_INTERVALS).join(', ')}`,
+      );
+    }
 
     const result = await this.ch.query({
       query: `

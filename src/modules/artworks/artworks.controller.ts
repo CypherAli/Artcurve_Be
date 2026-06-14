@@ -16,6 +16,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import {
@@ -137,6 +138,7 @@ export class ArtworksController {
     @Query('action') action: 'buy' | 'sell',
     @Query('amount', ParseIntPipe) amount: number,
   ) {
+    if (amount <= 0) throw new BadRequestException('Amount must be positive');
     const artwork = await this.artworksService.getArtworkById(id);
     const params  = this.curveEngine.paramsFromArtwork(artwork);
     const supply  = parseFloat(artwork.current_supply) || 0;
@@ -177,7 +179,6 @@ export class ArtworksController {
     summary: 'Chi tiết một artwork — dùng cho trade page và artwork detail',
     description:
       'Trả về đầy đủ thông tin artwork kèm creator info. ' +
-      'Tự động tăng view_count (fire-and-forget, không block). ' +
       'Public — không cần auth.',
   })
   @ApiParam({ name: 'id', description: 'UUID của artwork', type: String })
@@ -267,6 +268,16 @@ export class ArtworksController {
     if (!file) throw new BadRequestException('Vui lòng chọn file ảnh');
     if (!title?.trim()) throw new BadRequestException('title là bắt buộc');
 
+    // H4: Verify actual file type via magic bytes (client-sent mimetype is spoofable)
+    const { fileTypeFromBuffer } = await import('file-type');
+    const detected = await fileTypeFromBuffer(file.buffer);
+    const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!detected || !ALLOWED_MIMES.includes(detected.mime)) {
+      throw new BadRequestException(
+        `Invalid file type detected: ${detected?.mime ?? 'unknown'}. Only JPEG, PNG, GIF, WebP are allowed.`,
+      );
+    }
+
     return this.artworksService.uploadArtworkMedia(file, title.trim(), description);
   }
 
@@ -319,6 +330,7 @@ export class ArtworksController {
 
   @Post(':id/view')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Tăng view count (fire-and-forget)' })
   @ApiParam({ name: 'id', type: String })
