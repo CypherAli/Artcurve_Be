@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
+import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { EscalationTicket } from './entities/escalation-ticket.entity';
@@ -14,6 +16,8 @@ import { ChatGateway } from './chat.gateway';
   imports: [
     TypeOrmModule.forFeature([ChatSession, ChatMessage, EscalationTicket]),
     HttpModule,
+    AuthModule,
+    NotificationsModule,
   ],
   providers: [ChatService, GeminiService, EscalationService, ChatGateway],
   controllers: [ChatController],
