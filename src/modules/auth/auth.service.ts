@@ -364,9 +364,8 @@ export class AuthService {
     const ck = this.config.get('TWITTER_CONSUMER_KEY', '');
     const cs = this.config.get('TWITTER_CONSUMER_SECRET', '');
 
-    // 1. Retrieve stored token secret
-    const tokenSecret = await this.redisService.getTemp(`twitter_ts:${oauthToken}`) ?? '';
-    await this.redisService.deleteTemp(`twitter_ts:${oauthToken}`);
+    // 1. Retrieve stored token secret (atomic — chống replay)
+    const tokenSecret = await this.redisService.consumeTemp(`twitter_ts:${oauthToken}`) ?? '';
 
     // 2. Exchange for access token
     const tokenUrl = 'https://api.twitter.com/oauth/access_token';
@@ -603,12 +602,11 @@ export class AuthService {
     provider:     string;
   }> {
     const key = `auth_code:${code}`;
-    const raw = await this.redisService.getTemp(key);
+    // Atomic GETDEL — chống race condition khi 2 request cùng lúc
+    const raw = await this.redisService.consumeTemp(key);
     if (!raw) {
       throw new UnauthorizedException('Authorization code không hợp lệ hoặc đã hết hạn.');
     }
-    // Delete immediately — one-time use
-    await this.redisService.deleteTemp(key);
     return JSON.parse(raw);
   }
 

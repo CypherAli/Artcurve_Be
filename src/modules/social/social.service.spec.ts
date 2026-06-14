@@ -30,6 +30,7 @@ describe('SocialService', () => {
       count: jest.fn(),
       create: jest.fn(),
       remove: jest.fn(),
+      createQueryBuilder: jest.fn(),
     } as any;
 
     notifSvc = {
@@ -141,7 +142,16 @@ describe('SocialService', () => {
   // ── Comments ────────────────────────────────────────────────────
 
   describe('createComment', () => {
+    function mockNoDuplicate() {
+      const qb: any = {};
+      qb.where = jest.fn().mockReturnValue(qb);
+      qb.andWhere = jest.fn().mockReturnValue(qb);
+      qb.getOne = jest.fn().mockResolvedValue(null);
+      interactionRepo.createQueryBuilder.mockReturnValue(qb);
+    }
+
     it('should create COMMENT with rating', async () => {
+      mockNoDuplicate();
       const comment = { id: 'c1', content: 'Great art', rating: 5 };
       interactionRepo.create.mockReturnValue(comment as any);
       interactionRepo.save.mockResolvedValue(comment as any);
@@ -158,6 +168,7 @@ describe('SocialService', () => {
     });
 
     it('should create COMMENT without rating', async () => {
+      mockNoDuplicate();
       interactionRepo.create.mockReturnValue({ content: 'Nice' } as any);
       interactionRepo.save.mockResolvedValue({ content: 'Nice' } as any);
 

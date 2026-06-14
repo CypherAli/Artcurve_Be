@@ -106,6 +106,7 @@ describe('ArtworksService', () => {
         init_price: 0.001,
         target_cap: 100,
       };
+      artworkRepo.createQueryBuilder.mockReturnValue(makeQb(null) as any); // dedup check returns null
       artworkRepo.findOne.mockResolvedValue(null); // ticker not taken
       artworkRepo.create.mockReturnValue({ ...mockArtwork, title: dto.title } as Artwork);
       artworkRepo.save.mockResolvedValue({ ...mockArtwork, title: dto.title } as Artwork);

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger'
 import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max, MaxLength } from 'class-validator'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { SocialService } from './social.service'
 import { CurrentUser, Public } from '../../common/decorators'
 import { JwtPayload }    from '../auth/auth.service'
@@ -91,6 +92,7 @@ export class SocialController {
   // ── Comments / Reviews ────────────────────────────────────────────
 
   @Post('comment/:artworkId')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Viết review + rating cho artwork (COMMENT)' })
   @ApiBody({ type: CreateCommentDto })

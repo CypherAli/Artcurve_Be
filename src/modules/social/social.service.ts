@@ -86,6 +86,18 @@ export class SocialService {
     content: string,
     rating?: number,
   ): Promise<SocialInteraction> {
+    // Dedup: cùng user, cùng artwork, cùng content trong 30 giây → trả về comment cũ
+    const thirtySecondsAgo = new Date(Date.now() - 30_000)
+    const duplicate = await this.interactionRepo
+      .createQueryBuilder('si')
+      .where('si.user_id = :userId', { userId })
+      .andWhere('si.artwork_id = :artworkId', { artworkId })
+      .andWhere('si.interaction_type = :type', { type: 'COMMENT' })
+      .andWhere('si.content = :content', { content })
+      .andWhere('si.created_at > :since', { since: thirtySecondsAgo })
+      .getOne()
+    if (duplicate) return duplicate
+
     const interaction = this.interactionRepo.create({
       user_id:          userId,
       artwork_id:       artworkId,

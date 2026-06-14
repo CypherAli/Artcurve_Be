@@ -120,6 +120,19 @@ export class RedisService {
     else this.tempStore.delete(key)
   }
 
+  /** GETDEL — atomic: lấy temp value rồi xóa ngay (chống race condition) */
+  async consumeTemp(key: string): Promise<string | null> {
+    if (this.redisReady) {
+      return this.redis.getdel(`temp:${key}`)
+    }
+    // In-memory fallback
+    const entry = this.tempStore.get(key)
+    if (!entry) return null
+    this.tempStore.delete(key)
+    if (Date.now() > entry.expiresAt) return null
+    return entry.value
+  }
+
   // ════════════════════════════════════════════════════════════════════════════
   // AUTH — JWT Blacklist (logout that su)
   // ════════════════════════════════════════════════════════════════════════════
@@ -336,6 +349,22 @@ export class RedisService {
   // ════════════════════════════════════════════════════════════════════════════
   // UTILITIES
   // ════════════════════════════════════════════════════════════════════════════
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SET — track unique members (dùng cho live viewer dedup)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  async sadd(key: string, member: string): Promise<number> {
+    return this.redis.sadd(key, member)
+  }
+
+  async srem(key: string, member: string): Promise<number> {
+    return this.redis.srem(key, member)
+  }
+
+  async scard(key: string): Promise<number> {
+    return this.redis.scard(key)
+  }
 
   async ping(): Promise<boolean> {
     try {

@@ -76,6 +76,21 @@ export class ArtworksService {
    * Ticker được auto-generate từ title nếu frontend không truyền.
    */
   async createDraftArtwork(creatorId: string, dto: CreateArtworkDto): Promise<Artwork> {
+    // Dedup: DRAFT cùng creator + cùng title trong 60 giây → chặn double-submit
+    const sixtySecondsAgo = new Date(Date.now() - 60_000);
+    const recentDuplicate = await this.artworkRepo
+      .createQueryBuilder('artwork')
+      .where('artwork.creator_id = :creatorId', { creatorId })
+      .andWhere('artwork.title = :title', { title: dto.title })
+      .andWhere('artwork.status = :status', { status: ArtworkStatus.DRAFT })
+      .andWhere('artwork.created_at > :since', { since: sixtySecondsAgo })
+      .getOne();
+    if (recentDuplicate) {
+      throw new ConflictException(
+        'Artwork với cùng title vừa được tạo. Vui lòng đợi hoặc chọn title khác.',
+      );
+    }
+
     const ticker = dto.ticker ?? this.generateTicker(dto.title);
 
     // Kiểm tra ticker duplicate

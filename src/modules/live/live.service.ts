@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +17,7 @@ import {
 
 import { LiveStream }      from './entities/live-stream.entity';
 import { CreateStreamDto } from './dto/create-stream.dto';
+import { RedisService }    from '../../shared/redis/redis.service';
 
 @Injectable()
 export class LiveService {
@@ -25,6 +27,7 @@ export class LiveService {
     @InjectRepository(LiveStream)
     private readonly liveRepo: Repository<LiveStream>,
     private readonly config:   ConfigService,
+    private readonly redisService: RedisService,
   ) {}
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -68,6 +71,14 @@ export class LiveService {
     hostName: string,
     dto:      CreateStreamDto,
   ) {
+    // Kiểm tra host đã có stream đang live chưa
+    const activeStream = await this.liveRepo.findOne({
+      where: { host_id: hostId, is_live: true },
+    });
+    if (activeStream) {
+      throw new ConflictException('You already have an active stream');
+    }
+
     const roomName = `stream-${hostId.slice(0, 8)}-${Date.now()}`;
 
     // Tạo room trên LiveKit Cloud
@@ -202,21 +213,27 @@ export class LiveService {
 
     if (!roomName) return { ok: true };
 
-    if (event === 'participant_joined') {
-      await this.liveRepo
-        .createQueryBuilder()
-        .update()
-        .set({ viewer_count: () => 'viewer_count + 1' })
-        .where('room_name = :roomName AND is_live = true', { roomName })
-        .execute();
-    } else if (event === 'participant_left') {
-      await this.liveRepo
-        .createQueryBuilder()
-        .update()
-        .set({ viewer_count: () => 'GREATEST(viewer_count - 1, 0)' })
-        .where('room_name = :roomName AND is_live = true', { roomName })
-        .execute();
+    const participantId = (body['participant'] as Record<string, unknown>)?.['identity'] as string | undefined;
+
+    if (event === 'participant_joined' && participantId) {
+      const setKey = `live:viewers:${roomName}`;
+      await this.redisService.sadd(setKey, participantId);
+      const count = await this.redisService.scard(setKey);
+      await this.liveRepo.update(
+        { room_name: roomName, is_live: true },
+        { viewer_count: count },
+      );
+    } else if (event === 'participant_left' && participantId) {
+      const setKey = `live:viewers:${roomName}`;
+      await this.redisService.srem(setKey, participantId);
+      const count = await this.redisService.scard(setKey);
+      await this.liveRepo.update(
+        { room_name: roomName, is_live: true },
+        { viewer_count: count },
+      );
     } else if (event === 'room_finished') {
+      // Cleanup Redis viewer set
+      await this.redisService.del(`live:viewers:${roomName}`);
       await this.liveRepo.update(
         { room_name: roomName },
         { is_live: false, ended_at: new Date() },
