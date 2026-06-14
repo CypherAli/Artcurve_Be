@@ -268,13 +268,11 @@ export class ArtworksController {
     if (!file) throw new BadRequestException('Vui lòng chọn file ảnh');
     if (!title?.trim()) throw new BadRequestException('title là bắt buộc');
 
-    // H4: Verify actual file type via magic bytes (client-sent mimetype is spoofable)
-    const { fileTypeFromBuffer } = await import('file-type');
-    const detected = await fileTypeFromBuffer(file.buffer);
-    const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!detected || !ALLOWED_MIMES.includes(detected.mime)) {
+    // Verify actual file type via magic bytes (client-sent mimetype is spoofable)
+    const mime = this.detectImageMime(file.buffer);
+    if (!mime) {
       throw new BadRequestException(
-        `Invalid file type detected: ${detected?.mime ?? 'unknown'}. Only JPEG, PNG, GIF, WebP are allowed.`,
+        'Invalid file type. Only JPEG, PNG, GIF, WebP are allowed.',
       );
     }
 
@@ -372,5 +370,16 @@ export class ArtworksController {
       toDate,
       Math.min(limit ?? 200, 1000),
     );
+  }
+
+  private detectImageMime(buffer: Buffer): string | null {
+    if (buffer.length < 12) return null;
+    const b = buffer;
+    if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image/jpeg';
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'image/png';
+    if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+        b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+    return null;
   }
 }
