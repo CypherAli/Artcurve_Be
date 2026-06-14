@@ -123,6 +123,17 @@ export const envValidationSchema = Joi.object({
   GOOGLE_VISION_API_KEY: Joi.string().allow('').default(''),
   NSFW_SCORE_THRESHOLD: Joi.number().min(0).max(1).default(0.7),
 
+  // ── [15] AI Chat (Gemini) ─────────────────────────────────────────────────
+  GEMINI_API_KEY: Joi.string().allow('').default(''),
+
+  // ── [16] Escalation ───────────────────────────────────────────────────────
+  SMTP_HOST: Joi.string().allow('').default(''),
+  SMTP_PORT: Joi.number().integer().default(587),
+  SMTP_USER: Joi.string().allow('').default(''),
+  SMTP_PASS: Joi.string().allow('').default(''),
+  ESCALATION_EMAIL: Joi.string().allow('').default(''),
+  TELEGRAM_ESCALATION_CHAT_ID: Joi.string().allow('').default(''),
+
   // ── [12] Internal Security ─────────────────────────────────────────────────
   INTERNAL_SERVICE_KEY: Joi.string().allow('').default('change_me_to_random_secret'),
 

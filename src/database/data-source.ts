@@ -15,6 +15,9 @@ import { SocialInteraction }  from '../modules/social/entities/social-interactio
 import { ModerationLog }      from '../modules/artworks/entities/moderation-log.entity';
 import { LiveStream }         from '../modules/live/entities/live-stream.entity';
 import { Notification }      from '../modules/notifications/entities/notification.entity';
+import { ChatSession }       from '../modules/chat/entities/chat-session.entity';
+import { ChatMessage }       from '../modules/chat/entities/chat-message.entity';
+import { EscalationTicket }  from '../modules/chat/entities/escalation-ticket.entity';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const databaseUrl  = process.env.DATABASE_URL;
@@ -46,6 +49,9 @@ export const dataSourceOptions: DataSourceOptions = {
     ModerationLog,
     LiveStream,
     Notification,
+    ChatSession,
+    ChatMessage,
+    EscalationTicket,
   ],
 
   migrations: [__dirname + '/migrations/*{.ts,.js}'],

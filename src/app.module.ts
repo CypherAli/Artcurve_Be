@@ -43,6 +43,9 @@ import { LiveModule }               from './modules/live/live.module';
 // ── Notifications (@Global) ───────────────────────────────────────────────────
 import { NotificationsModule }      from './modules/notifications/notifications.module';
 
+// ── AI Chat ───────────────────────────────────────────────────────────────────
+import { ChatModule }               from './modules/chat/chat.module';
+
 // ── Blockchain Pipeline (@Global — merged indexer + consumer) ─────────────────
 import { BlockchainModule }         from './modules/blockchain/blockchain.module';
 
@@ -116,6 +119,9 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
 
     // ⑩ Live Streaming
     LiveModule,
+
+    // ⑪ AI Chat
+    ChatModule,
 
     // ⑨ Blockchain Pipeline (merged indexer + consumer)
     BlockchainModule,
