@@ -43,7 +43,7 @@ export class GeminiService {
   ) {
     this.apiKey = this.config.get<string>('GEMINI_API_KEY', '');
     this.endpoint =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
   }
 
   async chat(
