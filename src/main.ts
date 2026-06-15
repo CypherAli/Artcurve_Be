@@ -31,7 +31,7 @@ async function bootstrap() {
               'style-src':       ["'self'", 'https:'],
               'img-src':         ["'self'", 'data:', 'https:'],
               'font-src':        ["'self'", 'https:'],
-              'connect-src':     ["'self'"],
+              'connect-src':     ["'self'", 'https:', 'wss:'],
               'frame-ancestors': ["'none'"],
               'base-uri':        ["'self'"],
               'form-action':     ["'self'"],

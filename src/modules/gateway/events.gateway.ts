@@ -159,6 +159,7 @@ export class EventsGateway
   handleConnection(client: Socket): void {
     const user = client.data?.user as JwtPayload | undefined;
     if (user) {
+      client.join(`user:${user.sub}`);
       this.logger.debug(`WS connected: socketId=${client.id} wallet=${user.wallet}`);
     }
   }
@@ -259,5 +260,16 @@ export class EventsGateway
       .emit('artwork_graduated', { artwork_id: artworkId, timestamp: Date.now() });
 
     this.logger.log(`[WS] Broadcast artwork_graduated: artworkId=${artworkId}`);
+  }
+
+  /**
+   * Push notification to a specific user via WebSocket.
+   * User auto-joins room `user:{userId}` on connect.
+   */
+  pushNotification(userId: string, notification: {
+    id: string; type: string; title: string; message: string; created_at: string;
+  }): void {
+    this.server.to(`user:${userId}`).emit('notification', notification);
+    this.logger.debug(`[WS] Push notification → user:${userId} type=${notification.type}`);
   }
 }

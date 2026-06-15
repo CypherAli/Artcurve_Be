@@ -24,6 +24,7 @@ import { UsersModule }              from './modules/users/users.module';
 import { ArtworksModule }           from './modules/artworks/artworks.module';
 import { PortfolioModule }          from './modules/portfolio/portfolio.module';
 import { TradesModule }             from './modules/trades/trades.module';
+import { VaultModule }              from './modules/vault/vault.module';
 
 // ── Real-time Gateway ─────────────────────────────────────────────────────────
 import { GatewayModule }            from './modules/gateway/gateway.module';
@@ -42,6 +43,9 @@ import { LiveModule }               from './modules/live/live.module';
 
 // ── Notifications (@Global) ───────────────────────────────────────────────────
 import { NotificationsModule }      from './modules/notifications/notifications.module';
+
+// ── Guild ─────────────────────────────────────────────────────────────────────
+import { GuildModule }              from './modules/guild/guild.module';
 
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 import { ChatModule }               from './modules/chat/chat.module';
@@ -103,6 +107,7 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     ArtworksModule,
     PortfolioModule,
     TradesModule,
+    VaultModule,
 
     // ⑥ Real-time
     GatewayModule,
@@ -120,7 +125,10 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     // ⑩ Live Streaming
     LiveModule,
 
-    // ⑪ AI Chat
+    // ⑪ Guild
+    GuildModule,
+
+    // ⑫ AI Chat
     ChatModule,
 
     // ⑨ Blockchain Pipeline (merged indexer + consumer)

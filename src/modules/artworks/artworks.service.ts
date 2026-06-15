@@ -123,7 +123,30 @@ export class ArtworksService {
 
     const saved = await this.artworkRepo.save(artwork);
     this.logger.log(`Artwork DRAFT: id=${saved.id} ticker=${ticker} creator=${creatorId}`);
+
+    // Auto-moderate: DRAFT → AI_MODERATING (basic content check)
+    this.autoModerate(saved).catch((err) =>
+      this.logger.error(`Auto-moderation failed for ${saved.id}: ${err.message}`),
+    );
+
     return saved;
+  }
+
+  // ─── autoModerate ──────────────────────────────────────────────────────────
+
+  private async autoModerate(artwork: Artwork): Promise<void> {
+    const text = `${artwork.title} ${artwork.description ?? ''}`.toLowerCase();
+    const banned = ['porn', 'nude', 'xxx', 'drug', 'weapon', 'terrorism', 'child abuse'];
+    const flagged = banned.some((w) => text.includes(w));
+
+    if (flagged) {
+      this.logger.warn(`Artwork ${artwork.id} flagged by auto-moderation — kept as DRAFT`);
+      return;
+    }
+
+    artwork.status = ArtworkStatus.AI_MODERATING;
+    await this.artworkRepo.save(artwork);
+    this.logger.log(`Artwork ${artwork.id} → AI_MODERATING (auto)`);
   }
 
   // ─── getArtworkById ────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification, NotifType } from './entities/notification.entity';
+import { EventsGateway } from '../gateway/events.gateway';
 
 export interface CreateNotifDto {
   user_id:     string;
@@ -16,9 +17,11 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly repo: Repository<Notification>,
+    @Optional()
+    private readonly eventsGateway?: EventsGateway,
   ) {}
 
-  // ── Tạo thông báo (gọi nội bộ từ các consumer/service) ───────────────────
+  // ── Tạo thông báo + push real-time via WebSocket ─────────────────────────
   async create(dto: CreateNotifDto): Promise<Notification> {
     const notif = this.repo.create({
       user_id:     dto.user_id,
@@ -27,7 +30,17 @@ export class NotificationsService {
       description: dto.description ?? null,
       metadata:    dto.metadata    ?? null,
     });
-    return this.repo.save(notif);
+    const saved = await this.repo.save(notif);
+
+    this.eventsGateway?.pushNotification(dto.user_id, {
+      id:         saved.id,
+      type:       saved.type,
+      title:      saved.title,
+      message:    saved.description ?? '',
+      created_at: saved.created_at.toISOString(),
+    });
+
+    return saved;
   }
 
   // ── Lấy danh sách cho user (mới nhất trước, giới hạn 50) ─────────────────

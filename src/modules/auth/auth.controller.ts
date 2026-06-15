@@ -333,12 +333,27 @@ export class AuthController {
     if (!body.code) throw new BadRequestException('Missing code parameter');
     const data = await this.authService.consumeAuthCode(body.code);
     return {
-      access_token: data.access_token,
-      address:      data.address,
-      name:         data.name,
-      avatar:       data.avatar,
-      provider:     data.provider,
+      access_token:  data.access_token,
+      refresh_token: data.refresh_token,
+      address:       data.address,
+      name:          data.name,
+      avatar:        data.avatar,
+      provider:      data.provider,
     };
+  }
+
+  // ── POST /auth/refresh ─────────────────────────────────────────────────────
+
+  @Post('refresh')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Refresh access token — rotate refresh token' })
+  @ApiResponse({ status: 200, description: 'New access_token + refresh_token' })
+  @ApiResponse({ status: 401, description: 'Refresh token invalid or expired' })
+  async refresh(@Body() body: { refresh_token: string }) {
+    if (!body.refresh_token) throw new BadRequestException('Missing refresh_token');
+    return this.authService.refreshAccessToken(body.refresh_token);
   }
 
   // ── POST /auth/logout ──────────────────────────────────────────────────────

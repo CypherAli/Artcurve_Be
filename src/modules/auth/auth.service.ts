@@ -143,8 +143,9 @@ export class AuthService {
     signature: string,
     rawMessage: string,
   ): Promise<{
-    access_token: string;
-    expires_in:   number;
+    access_token:  string;
+    refresh_token: string;
+    expires_in:    number;
     user: {
       id:             string;
       wallet_address: string;
@@ -206,22 +207,12 @@ export class AuthService {
 
     const user = users[0];
 
-    // 5. Phát JWT với jti (support logout/blacklist)
-    const jti       = uuidv4();
-    const expiresIn = 7 * 24 * 3600; // 7 ngày
-    const jwtPayload: JwtPayload = {
-      sub:    user.id,
-      wallet: normalized,
-      role:   user.role,
-      jti,
-    };
-
-    const access_token = this.jwtService.sign(jwtPayload, { expiresIn });
-    this.logger.log(`[SIWE] JWT issued: wallet=${normalized}, jti=${jti}`);
+    // 5. Phát token pair (access 15m + refresh 30d)
+    const tokens = await this.issueTokenPair(user);
+    this.logger.log(`[SIWE] Token pair issued: wallet=${normalized}`);
 
     return {
-      access_token,
-      expires_in: expiresIn,
+      ...tokens,
       user: {
         id:             user.id,
         wallet_address: user.wallet_address,
@@ -235,6 +226,7 @@ export class AuthService {
   // ── githubLogin ───────────────────────────────────────────────────────────
   async githubLogin(code: string): Promise<{
     access_token: string;
+    refresh_token: string;
     expires_in:   number;
     user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
   }> {
@@ -279,18 +271,11 @@ export class AuthService {
     );
     const user = users[0];
 
-    // 5. Issue JWT
-    const jti       = uuidv4();
-    const expiresIn = 7 * 24 * 3600;
-    const access_token = this.jwtService.sign(
-      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
-      { expiresIn },
-    );
-
-    this.logger.log(`[GitHub] JWT issued: github=${profile.login}, wallet=${walletAddress}`);
+    // 5. Issue token pair
+    const tokens = await this.issueTokenPair(user);
+    this.logger.log(`[GitHub] Token pair issued: github=${profile.login}, wallet=${walletAddress}`);
     return {
-      access_token,
-      expires_in: expiresIn,
+      ...tokens,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
   }
@@ -358,6 +343,7 @@ export class AuthService {
   // ── twitterLogin (OAuth 1.0a) ──────────────────────────────────────────────
   async twitterLogin(oauthToken: string, oauthVerifier: string): Promise<{
     access_token: string;
+    refresh_token: string;
     expires_in:   number;
     user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
   }> {
@@ -411,24 +397,18 @@ export class AuthService {
     );
     const user = rows[0];
 
-    // 6. Issue JWT
-    const jti      = uuidv4();
-    const expiresIn = 7 * 24 * 3600;
-    const access_token = this.jwtService.sign(
-      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
-      { expiresIn },
-    );
-
-    this.logger.log(`[Twitter] JWT issued: @${screenName}, wallet=${walletAddress}`);
+    // 6. Issue token pair
+    const tokens = await this.issueTokenPair(user);
+    this.logger.log(`[Twitter] Token pair issued: @${screenName}, wallet=${walletAddress}`);
     return {
-      access_token, expires_in: expiresIn,
+      ...tokens,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
   }
 
   // ── telegramLogin ─────────────────────────────────────────────────────────
   async telegramLogin(tgData: Record<string, string>): Promise<{
-    access_token: string; expires_in: number;
+    access_token: string; refresh_token: string; expires_in: number;
     user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
   }> {
     const botToken = this.config.get('TELEGRAM_BOT_TOKEN', '');
@@ -477,16 +457,11 @@ export class AuthService {
     );
     const user = rows[0];
 
-    // 5. Issue JWT
-    const jti       = uuidv4();
-    const expiresIn = 7 * 24 * 3600;
-    const access_token = this.jwtService.sign(
-      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
-      { expiresIn },
-    );
-    this.logger.log(`[Telegram] JWT issued: tgId=${tgId}, @${username}, wallet=${walletAddress}`);
+    // 5. Issue token pair
+    const tokens = await this.issueTokenPair(user);
+    this.logger.log(`[Telegram] Token pair issued: tgId=${tgId}, @${username}, wallet=${walletAddress}`);
     return {
-      access_token, expires_in: expiresIn,
+      ...tokens,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
   }
@@ -494,6 +469,7 @@ export class AuthService {
   // ── googleLogin ──────────────────────────────────────────────────────────
   async googleLogin(code: string, redirectUri: string): Promise<{
     access_token: string;
+    refresh_token: string;
     expires_in:   number;
     user: { id: string; wallet_address: string; username: string | null; avatar_url: string | null; role: string; is_verified: boolean };
   }> {
@@ -554,17 +530,11 @@ export class AuthService {
     );
     const user = rows[0];
 
-    // 5. Issue JWT
-    const jti       = uuidv4();
-    const expiresIn = 7 * 24 * 3600;
-    const access_token = this.jwtService.sign(
-      { sub: user.id, wallet: walletAddress, role: user.role, jti } as JwtPayload,
-      { expiresIn },
-    );
-
-    this.logger.log(`[Google] JWT issued: email=${profile.email}, wallet=${walletAddress}`);
+    // 5. Issue token pair
+    const tokens = await this.issueTokenPair(user);
+    this.logger.log(`[Google] Token pair issued: email=${profile.email}, wallet=${walletAddress}`);
     return {
-      access_token, expires_in: expiresIn,
+      ...tokens,
       user: { id: user.id, wallet_address: walletAddress, username: user.username ?? null, avatar_url: user.avatar_url ?? null, role: user.role, is_verified: user.is_verified },
     };
   }
@@ -576,14 +546,16 @@ export class AuthService {
    */
   async createAuthCode(result: {
     access_token: string;
+    refresh_token: string;
     user: { wallet_address: string; username: string | null; avatar_url: string | null };
   }, provider: string): Promise<string> {
     const code = uuidv4();
     const payload = JSON.stringify({
-      access_token: result.access_token,
-      address:      result.user.wallet_address,
-      name:         result.user.username ?? '',
-      avatar:       result.user.avatar_url ?? '',
+      access_token:  result.access_token,
+      refresh_token: result.refresh_token,
+      address:       result.user.wallet_address,
+      name:          result.user.username ?? '',
+      avatar:        result.user.avatar_url ?? '',
       provider,
     });
     await this.redisService.setTemp(`auth_code:${code}`, payload, 60);
@@ -595,11 +567,12 @@ export class AuthService {
    * Mỗi code chỉ dùng được 1 lần (atomic get + delete).
    */
   async consumeAuthCode(code: string): Promise<{
-    access_token: string;
-    address:      string;
-    name:         string;
-    avatar:       string;
-    provider:     string;
+    access_token:  string;
+    refresh_token: string;
+    address:       string;
+    name:          string;
+    avatar:        string;
+    provider:      string;
   }> {
     const key = `auth_code:${code}`;
     // Atomic GETDEL — chống race condition khi 2 request cùng lúc
@@ -608,6 +581,75 @@ export class AuthService {
       throw new UnauthorizedException('Authorization code không hợp lệ hoặc đã hết hạn.');
     }
     return JSON.parse(raw);
+  }
+
+  // ── issueTokenPair ─────────────────────────────────────────────────────────
+  /**
+   * Phát cặp access_token (15 phút) + refresh_token (30 ngày).
+   * Refresh token lưu hash SHA-256 vào Redis để support rotation + revocation.
+   */
+  private async issueTokenPair(user: {
+    id: string; wallet_address: string; role: string;
+  }): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+    const jti            = uuidv4();
+    const accessExpiresIn = 15 * 60; // 15 phút
+    const payload: JwtPayload = {
+      sub:    user.id,
+      wallet: user.wallet_address,
+      role:   user.role,
+      jti,
+    };
+    const access_token = this.jwtService.sign(payload, { expiresIn: accessExpiresIn });
+
+    // Refresh token — random 64 bytes, lưu hash vào Redis
+    const refreshToken     = randomBytes(48).toString('base64url');
+    const refreshHash      = createHash('sha256').update(refreshToken).digest('hex');
+    const refreshTtl       = 30 * 24 * 3600; // 30 ngày
+    await this.redisService.setTemp(`refresh:${user.id}:${refreshHash}`, JSON.stringify({
+      userId: user.id, wallet: user.wallet_address, role: user.role, jti,
+    }), refreshTtl);
+
+    return { access_token, refresh_token: refreshToken, expires_in: accessExpiresIn };
+  }
+
+  // ── refreshAccessToken ────────────────────────────────────────────────────
+  /**
+   * Refresh token rotation: consume old refresh token, issue new pair.
+   * Old refresh token bị xoá ngay — chống replay.
+   */
+  async refreshAccessToken(refreshToken: string): Promise<{
+    access_token:  string;
+    refresh_token: string;
+    expires_in:    number;
+  }> {
+    const refreshHash = createHash('sha256').update(refreshToken).digest('hex');
+
+    // Tìm refresh token trong Redis (scan tất cả user keys)
+    // Pattern: refresh:<userId>:<hash>
+    const keys = await this.redisService.scanKeys(`refresh:*:${refreshHash}`);
+    if (!keys.length) {
+      throw new UnauthorizedException('Refresh token không hợp lệ hoặc đã hết hạn.');
+    }
+
+    const key = keys[0];
+    const raw = await this.redisService.consumeTemp(key);
+    if (!raw) {
+      throw new UnauthorizedException('Refresh token đã được sử dụng (possible replay).');
+    }
+
+    const data = JSON.parse(raw) as { userId: string; wallet: string; role: string };
+
+    // Verify user vẫn tồn tại
+    const users = await this.dataSource.query(
+      'SELECT id, wallet_address, role FROM users WHERE id = $1',
+      [data.userId],
+    );
+    if (!users.length) {
+      throw new UnauthorizedException('User không còn tồn tại.');
+    }
+
+    const user = users[0];
+    return this.issueTokenPair(user);
   }
 
   // ── logout ─────────────────────────────────────────────────────────────────

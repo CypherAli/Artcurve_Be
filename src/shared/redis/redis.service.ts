@@ -379,4 +379,17 @@ export class RedisService {
   async del(...keys: string[]): Promise<void> {
     if (keys.length > 0) await this.redis.del(...keys);
   }
+
+  /** Scan keys matching pattern (dùng cho refresh token lookup) */
+  async scanKeys(pattern: string, count = 100): Promise<string[]> {
+    const results: string[] = [];
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+      cursor = next;
+      results.push(...keys);
+      if (results.length > 0) break;
+    } while (cursor !== '0');
+    return results;
+  }
 }
