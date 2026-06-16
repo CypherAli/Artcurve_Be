@@ -89,23 +89,23 @@ export class GuildService {
     });
     if (existing) throw new ConflictException('Already a member');
 
-    const member = this.memberRepo.create({
-      guild_id: guildId,
-      user_id: userId,
-      role: GuildRole.MEMBER,
-    });
-
-    // Atomic guard chống race: nếu 2 request đồng thời, unique constraint
-    // (guild_id, user_id) sẽ chặn bản ghi thứ 2 → chỉ increment khi insert thành công.
+    // Insert member + increment count trong CÙNG transaction → không bao giờ lệch
+    // (kể cả khi process crash giữa chừng). Unique (guild_id, user_id) chặn double-join.
     try {
-      await this.memberRepo.save(member);
+      await this.memberRepo.manager.transaction(async (em) => {
+        await em.insert(GuildMember, {
+          guild_id: guildId,
+          user_id: userId,
+          role: GuildRole.MEMBER,
+        });
+        await em.increment(Guild, { id: guildId }, 'member_count', 1);
+      });
     } catch (err) {
       if (err instanceof QueryFailedError && (err as any).code === '23505') {
         throw new ConflictException('Already a member');
       }
       throw err;
     }
-    await this.guildRepo.increment({ id: guildId }, 'member_count', 1);
 
     return { joined: true };
   }
@@ -121,8 +121,15 @@ export class GuildService {
       throw new BadRequestException('Owner cannot leave the guild');
     }
 
-    await this.memberRepo.remove(member);
-    await this.guildRepo.decrement({ id: guildId }, 'member_count', 1);
+    // Remove + decrement atomic; GREATEST(...,0) tránh count âm nếu có lệch dữ liệu cũ
+    await this.memberRepo.manager.transaction(async (em) => {
+      await em.delete(GuildMember, { id: member.id });
+      await em.createQueryBuilder()
+        .update(Guild)
+        .set({ member_count: () => 'GREATEST(member_count - 1, 0)' })
+        .where('id = :id', { id: guildId })
+        .execute();
+    });
 
     return { left: true };
   }

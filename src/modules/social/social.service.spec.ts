@@ -202,13 +202,17 @@ describe('SocialService', () => {
   // ── Stats ───────────────────────────────────────────────────────
 
   describe('getArtworkStats', () => {
+    const mockStatsQb = (raw: { like_count: string; comment_count: string; avg_rating: string | null }) => {
+      const qb: any = {};
+      qb.select = jest.fn().mockReturnValue(qb);
+      qb.addSelect = jest.fn().mockReturnValue(qb);
+      qb.where = jest.fn().mockReturnValue(qb);
+      qb.getRawOne = jest.fn().mockResolvedValue(raw);
+      interactionRepo.createQueryBuilder.mockReturnValue(qb);
+    };
+
     it('should calculate stats correctly', async () => {
-      interactionRepo.count.mockResolvedValue(10);
-      interactionRepo.find.mockResolvedValue([
-        { rating: 4 },
-        { rating: 5 },
-        { rating: null },
-      ] as any);
+      mockStatsQb({ like_count: '10', comment_count: '3', avg_rating: '4.5' });
 
       const stats = await service.getArtworkStats('art-1');
       expect(stats.like_count).toBe(10);
@@ -217,8 +221,7 @@ describe('SocialService', () => {
     });
 
     it('should return null avg_rating when no ratings', async () => {
-      interactionRepo.count.mockResolvedValue(0);
-      interactionRepo.find.mockResolvedValue([]);
+      mockStatsQb({ like_count: '0', comment_count: '0', avg_rating: null });
 
       const stats = await service.getArtworkStats('art-1');
       expect(stats.avg_rating).toBeNull();

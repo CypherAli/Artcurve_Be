@@ -128,10 +128,13 @@ export class ArtworksService {
     const saved = await this.artworkRepo.save(artwork);
     this.logger.log(`Artwork DRAFT: id=${saved.id} ticker=${ticker} creator=${creatorId}`);
 
-    // Auto-moderate: DRAFT → AI_MODERATING (basic content check)
-    this.autoModerate(saved).catch((err) =>
-      this.logger.error(`Auto-moderation failed for ${saved.id}: ${err.message}`),
-    );
+    // Auto-moderate: DRAFT → AI_MODERATING (keyword check cục bộ, không gọi network).
+    // Awaited để không nuốt lỗi âm thầm; nếu lỗi vẫn trả artwork DRAFT cho user retry.
+    try {
+      await this.autoModerate(saved);
+    } catch (err) {
+      this.logger.error(`Auto-moderation failed for ${saved.id}: ${(err as Error).message}`);
+    }
 
     return saved;
   }

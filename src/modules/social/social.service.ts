@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, ConflictException, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, DataSource, QueryFailedError } from 'typeorm'
 import { Follower }         from './entities/follower.entity'
@@ -95,6 +95,11 @@ export class SocialService {
     content: string,
     rating?: number,
   ): Promise<SocialInteraction> {
+    // Guard tại service layer (phòng khi gọi bỏ qua DTO) — DB cũng có CHECK constraint
+    if (rating !== undefined && rating !== null && (rating < 1 || rating > 5)) {
+      throw new BadRequestException('rating phải nằm trong khoảng 1–5')
+    }
+
     // Dedup: cùng user, cùng artwork, cùng content trong 30 giây → trả về comment cũ
     const thirtySecondsAgo = new Date(Date.now() - 30_000)
     const duplicate = await this.interactionRepo
@@ -145,23 +150,21 @@ export class SocialService {
     comment_count: number
     avg_rating:    number | null
   }> {
-    const [likeCount, comments] = await Promise.all([
-      this.interactionRepo.count({ where: { artwork_id: artworkId, interaction_type: 'LIKE' } }),
-      this.interactionRepo.find({
-        where:  { artwork_id: artworkId, interaction_type: 'COMMENT' },
-        select: ['rating'],
-      }),
-    ])
+    // 1 query aggregation thay vì fetch toàn bộ comment rồi tính in-memory (tránh N+1/full scan)
+    const row = await this.interactionRepo
+      .createQueryBuilder('si')
+      .select(`COUNT(*) FILTER (WHERE si.interaction_type = 'LIKE')`,    'like_count')
+      .addSelect(`COUNT(*) FILTER (WHERE si.interaction_type = 'COMMENT')`, 'comment_count')
+      .addSelect(`AVG(si.rating) FILTER (WHERE si.interaction_type = 'COMMENT' AND si.rating IS NOT NULL)`, 'avg_rating')
+      .where('si.artwork_id = :id', { id: artworkId })
+      .getRawOne<{ like_count: string; comment_count: string; avg_rating: string | null }>()
 
-    const rated = comments.filter(c => c.rating !== null)
-    const avgRating = rated.length > 0
-      ? rated.reduce((sum, c) => sum + (c.rating as number), 0) / rated.length
-      : null
+    const avg = row?.avg_rating != null ? parseFloat(row.avg_rating) : null
 
     return {
-      like_count:    likeCount,
-      comment_count: comments.length,
-      avg_rating:    avgRating !== null ? Math.round(avgRating * 10) / 10 : null,
+      like_count:    parseInt(row?.like_count ?? '0', 10),
+      comment_count: parseInt(row?.comment_count ?? '0', 10),
+      avg_rating:    avg !== null ? Math.round(avg * 10) / 10 : null,
     }
   }
 }
