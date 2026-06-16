@@ -9,9 +9,14 @@ const compression = require('compression')
 import { AppModule }               from './app.module'
 import { AllExceptionsFilter }     from './common/filters/all-exceptions.filter'
 import { TransformInterceptor }    from './common/interceptors/transform.interceptor'
+import { initSentry, closeSentry } from './common/observability/sentry.util'
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
+
+  // Init Sentry SỚM — bắt cả lỗi trong quá trình khởi động
+  initSentry(process.env.SENTRY_DSN, process.env.NODE_ENV ?? 'development')
+
   // rawBody: true — cần để verify LiveKit webhook signature (HMAC trên raw bytes)
   const app    = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true })
   const config = app.get(ConfigService)
@@ -125,6 +130,19 @@ async function bootstrap() {
       },
     })
     logger.log(`Swagger UI: http://localhost:${config.get('PORT') ?? 3001}/api/docs`)
+  }
+
+  // Graceful shutdown — flush Sentry + đóng connection trong giới hạn thời gian
+  // để Render/K8s không SIGKILL giữa chừng (drain trong ~10s).
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      logger.log(`Received ${signal} — shutting down gracefully`)
+      void (async () => {
+        await app.close()
+        await closeSentry(2000)
+        process.exit(0)
+      })()
+    })
   }
 
   const port = config.get<number>('PORT') ?? 3001

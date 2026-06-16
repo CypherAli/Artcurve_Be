@@ -5,6 +5,7 @@ import { Transaction, TransactionType } from '../../trades/entities/transaction.
 import { Artwork, ArtworkStatus } from '../../artworks/entities/artwork.entity';
 import { PortfolioHolding } from '../../portfolio/entities/portfolio-holding.entity';
 import { RedisService } from '../../../shared/redis/redis.service';
+import { REDIS_KEYS }   from '../../../shared/redis/redis.constants';
 import { ClickHouseBufferService } from '../../../shared/clickhouse/clickhouse-buffer.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -354,8 +355,10 @@ export class BlockchainEventConsumer {
           is_buy:         true,
           user_wallet:    payload.user_wallet,
           share_amount:   payload.share_amount,
+          eth_amount:     payload.eth_amount,
           timestamp:      Date.now(),
         }),
+        this.redisService.cacheDel(REDIS_KEYS.cacheArtwork(artworkDbId!)),
       ]);
       this.logger.log(`[Redis] BuyShares synced: artwork=${artworkDbId} price=${newPrice}`);
     } catch (redisErr) {
@@ -483,8 +486,10 @@ export class BlockchainEventConsumer {
           is_buy:         false,
           user_wallet:    payload.user_wallet,
           share_amount:   payload.share_amount,
+          eth_amount:     payload.eth_amount,
           timestamp:      Date.now(),
         }),
+        this.redisService.cacheDel(REDIS_KEYS.cacheArtwork(artworkDbId!)),
       ]);
     } catch (redisErr) {
       this.logger.warn(`[Redis] Sync failed: ${redisErr.message}`);

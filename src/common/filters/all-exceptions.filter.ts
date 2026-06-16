@@ -7,6 +7,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
+import { captureException } from '../observability/sentry.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AllExceptionsFilter  (src/common/filters/)
@@ -39,6 +41,7 @@ export interface ErrorResponseBody {
   path:       string;
   method:     string;
   message:    string | string[];
+  error_id?:  string;   // chỉ có ở 5xx — dùng để tra cứu trong Sentry/logs
 }
 
 @Catch()
@@ -52,21 +55,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const { status, message } = this.resolveException(exception);
 
+    // 5xx → gắn error_id để client báo support, đồng thời log + gửi Sentry cùng id
+    const errorId = status >= 500 ? randomUUID() : undefined;
+
     const body: ErrorResponseBody = {
       statusCode: status,
       timestamp:  new Date().toISOString(),
       path:       request.url,
       method:     request.method,
       message,
+      ...(errorId ? { error_id: errorId } : {}),
     };
 
     // 5xx → log error với stack trace (chỉ trên server, không gửi ra client)
     // 4xx → log warn nhẹ hơn
     if (status >= 500) {
       this.logger.error(
-        `[${request.method}] ${request.url} → ${status}`,
+        `[${request.method}] ${request.url} → ${status} (error_id=${errorId})`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      captureException(exception, {
+        error_id:    errorId,
+        method:      request.method,
+        path:        request.url,
+        status_code: status,
+      });
     } else {
       this.logger.warn(`[${request.method}] ${request.url} → ${status}: ${JSON.stringify(message)}`);
     }

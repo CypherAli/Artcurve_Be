@@ -16,6 +16,7 @@ import { Artwork }                          from '../../artworks/entities/artwor
 import { Transaction, TransactionType }     from '../../trades/entities/transaction.entity';
 import { PortfolioHolding }                 from '../../portfolio/entities/portfolio-holding.entity';
 import { RedisService }                     from '../../../shared/redis/redis.service';
+import { REDIS_KEYS }                       from '../../../shared/redis/redis.constants';
 import { EventsGateway }                    from '../../gateway/events.gateway';
 import { NotificationsService }             from '../../notifications/notifications.service';
 
@@ -232,6 +233,11 @@ export class OrderMatchConsumer implements OnModuleInit {
       volume_24h:     newVol,
       updated_at:     result.matched_at,
     });
+
+    // Invalidate cache chi tiet artwork — gia/supply vua doi sau trade.
+    // KHONG bump version marketplace o day: gia trong list chap nhan tre <=30s
+    // (FE da nhan gia realtime qua WebSocket) → giu cache hit rate cao.
+    await this.redis.cacheDel(REDIS_KEYS.cacheArtwork(artwork_id));
 
     // 5. Publish to Redis → Go WS Hub broadcasts to all viewers
     await this.redis.publishPriceUpdate({

@@ -126,6 +126,10 @@ export const envValidationSchema = Joi.object({
   // ── [15] AI Chat (Gemini) ─────────────────────────────────────────────────
   GEMINI_API_KEY: Joi.string().allow('').default(''),
 
+  // ── [16] Observability ─────────────────────────────────────────────────────
+  // Optional — không set thì Sentry tắt (app vẫn chạy bình thường)
+  SENTRY_DSN: Joi.string().allow('').default(''),
+
   // ── [16] Escalation ───────────────────────────────────────────────────────
   SMTP_HOST: Joi.string().allow('').default(''),
   SMTP_PORT: Joi.number().integer().default(587),

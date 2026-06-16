@@ -243,6 +243,66 @@ export class RedisService {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // RESPONSE CACHE — read-through JSON cache cho hot paths (marketplace, detail)
+  // Fail-open: nếu Redis down → trả null (miss) / no-op, KHÔNG ném lỗi.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /** Đọc JSON đã cache. Trả null nếu miss hoặc Redis không sẵn sàng. */
+  async cacheGetJson<T>(key: string): Promise<T | null> {
+    if (!this.redisReady) return null;
+    try {
+      const raw = await this.redis.get(key);
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Ghi JSON vào cache với TTL (giây). No-op nếu Redis không sẵn sàng. */
+  async cacheSetJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    if (!this.redisReady) return;
+    try {
+      await this.redis.setex(key, ttlSeconds, JSON.stringify(value));
+    } catch {
+      /* fail-open: cache write không được phép làm hỏng request */
+    }
+  }
+
+  /** Xoá 1 key cache (invalidation tức thì cho artwork detail). */
+  async cacheDel(key: string): Promise<void> {
+    if (!this.redisReady) return;
+    try {
+      await this.redis.del(key);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Lấy version hiện tại của một namespace cache (vd: 'marketplace').
+   * Version nhúng vào cache key → bump version = vô hiệu hoá toàn bộ list cũ
+   * tức thì mà KHÔNG cần SCAN/DEL pattern (tránh O(N) trên Redis).
+   */
+  async cacheGetVersion(ns: string): Promise<string> {
+    if (!this.redisReady) return '0';
+    try {
+      return (await this.redis.get(REDIS_KEYS.cacheVersion(ns))) ?? '0';
+    } catch {
+      return '0';
+    }
+  }
+
+  /** Tăng version → mọi list cache cũ của namespace trở thành orphan (tự hết hạn theo TTL). */
+  async cacheBumpVersion(ns: string): Promise<void> {
+    if (!this.redisReady) return;
+    try {
+      await this.redis.incr(REDIS_KEYS.cacheVersion(ns));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // LEADERBOARD — ZADD/ZREVRANGE
   // ════════════════════════════════════════════════════════════════════════════
 

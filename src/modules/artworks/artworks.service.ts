@@ -17,6 +17,10 @@ import {
 } from './dto/create-artwork.dto';
 import { PinataService }  from './pinata.service';
 import { RedisService }   from '../../shared/redis/redis.service';
+import { REDIS_KEYS, TTL } from '../../shared/redis/redis.constants';
+
+// Namespace cho versioned marketplace list cache
+const CACHE_NS_MARKETPLACE = 'marketplace';
 
 // ── State machine ─────────────────────────────────────────────────────────────
 const VALID_TRANSITIONS: Record<ArtworkStatus, ArtworkStatus[]> = {
@@ -157,6 +161,11 @@ export class ArtworksService {
    * Tự động tăng view_count (fire-and-forget).
    */
   async getArtworkById(id: string): Promise<Artwork> {
+    // Read-through cache — invalidate khi status change / trade (xem invalidateArtwork)
+    const cacheKey = REDIS_KEYS.cacheArtwork(id);
+    const cached = await this.redisService.cacheGetJson<Artwork>(cacheKey);
+    if (cached) return cached;
+
     const artwork = await this.artworkRepo
       .createQueryBuilder('artwork')
       .leftJoin('artwork.creator', 'creator')
@@ -170,7 +179,17 @@ export class ArtworksService {
 
     if (!artwork) throw new NotFoundException(`Artwork ${id} không tồn tại`);
 
+    await this.redisService.cacheSetJson(cacheKey, artwork, TTL.CACHE_DETAIL);
     return artwork;
+  }
+
+  /**
+   * Invalidate cache của 1 artwork + bump version marketplace.
+   * Gọi khi: đổi status, hoặc sau trade (giá/supply thay đổi).
+   */
+  async invalidateArtwork(id: string): Promise<void> {
+    await this.redisService.cacheDel(REDIS_KEYS.cacheArtwork(id));
+    await this.redisService.cacheBumpVersion(CACHE_NS_MARKETPLACE);
   }
 
   // ─── getMarketplace ────────────────────────────────────────────────────────
@@ -195,6 +214,14 @@ export class ArtworksService {
       view_count: 'artwork.view_count',
     }[sortBy] ?? 'artwork.created_at';
 
+    // Versioned list cache: key nhúng version → bump version (khi tạo/đổi status
+    // artwork) vô hiệu hoá toàn bộ list cũ tức thì. Giá có thể trễ tối đa CACHE_LIST
+    // giây nhưng FE đã nhận giá realtime qua WebSocket nên chấp nhận được.
+    const ver      = await this.redisService.cacheGetVersion(CACHE_NS_MARKETPLACE);
+    const cacheKey = REDIS_KEYS.cacheList(CACHE_NS_MARKETPLACE, ver, `${sortBy}:${page}:${limit}`);
+    const cached   = await this.redisService.cacheGetJson<{ data: Artwork[]; total: number; page: number }>(cacheKey);
+    if (cached) return cached;
+
     const [data, total] = await this.artworkRepo
       .createQueryBuilder('artwork')
       .leftJoin('artwork.creator', 'creator')
@@ -205,7 +232,9 @@ export class ArtworksService {
       .take(limit)
       .getManyAndCount();
 
-    return { data, total, page };
+    const result = { data, total, page };
+    await this.redisService.cacheSetJson(cacheKey, result, TTL.CACHE_LIST);
+    return result;
   }
 
   /**
@@ -376,6 +405,10 @@ export class ArtworksService {
 
     artwork.status = newStatus;
     const saved = await this.artworkRepo.save(artwork);
+
+    // Invalidate cache: chi tiet artwork + marketplace list (set membership đổi)
+    await this.invalidateArtwork(artworkId);
+
     this.logger.log(`Artwork ${artworkId} → ${newStatus}`);
     return saved;
   }

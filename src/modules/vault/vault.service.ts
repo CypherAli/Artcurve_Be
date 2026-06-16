@@ -81,22 +81,11 @@ export class VaultService {
       ? ZERO
       : unrealizedPnl.div(totalCost).mul(100);
 
-    // 2. Realized P&L: sum ETH from SELL transactions minus cost basis of sold shares
-    //    cost basis of sold shares = share_amount * avg_buy_price at time of sale
-    //    Simplified: realized = SUM(sell eth_amount) - SUM(sell share_amount * price they were bought at)
-    //    Since we don't track per-lot cost basis, approximate using:
-    //    realized = SUM(SELL eth_amount) - SUM(SELL share_amount * current avg_buy_price from portfolio)
-    //    Better approach: calculate directly from sell transactions
-    const realizedRows: Array<{ realized_pnl: string }> = await this.dataSource.query(
-      `SELECT COALESCE(SUM(
-        t.eth_amount - (t.share_amount * COALESCE(ph.avg_buy_price, t.price_per_share))
-      ), 0)::TEXT AS realized_pnl
-       FROM transactions t
-       LEFT JOIN portfolio_holdings ph ON ph.user_id = t.user_id AND ph.artwork_id = t.artwork_id
-       WHERE t.user_id = $1 AND t.tx_type = 'SELL'`,
-      [userId],
-    );
-    const realizedPnl = new Decimal(realizedRows[0]?.realized_pnl ?? '0');
+    // 2. Realized P&L — tính bằng replay chronological với average-cost basis.
+    //    KHÔNG dùng avg_buy_price hiện tại (sai vì nó thay đổi theo thời gian và =0
+    //    sau khi thoát hết vị thế). Average-cost nhất quán với cách consumer duy trì
+    //    avg_buy_price (weighted average trên mỗi BUY).
+    const realizedPnl = await this.computeRealizedPnl(userId);
 
     // 3. ETH balance placeholder — would come from on-chain or wallet service
     const ethBalance = '0.00000000';
@@ -110,6 +99,59 @@ export class VaultService {
       eth_balance: ethBalance,
       holdings_count: holdings.length,
     };
+  }
+
+  // ─── computeRealizedPnl ─────────────────────────────────────────────────────
+
+  /**
+   * Realized P&L theo average-cost basis (đúng về kế toán, nhất quán với avg_buy_price).
+   *
+   * Replay toàn bộ giao dịch theo thứ tự thời gian, giữ per-artwork { shares, cost }:
+   *   - BUY  : shares += amount;  cost += eth
+   *   - SELL : avgCost = cost / shares
+   *            realized += sellEth − avgCost * sharesBán
+   *            shares −= sharesBán;  cost −= avgCost * sharesBán
+   *
+   * Bounded theo số giao dịch của 1 user nên chạy in-memory là đủ nhanh.
+   */
+  private async computeRealizedPnl(userId: string): Promise<Decimal> {
+    const txs: Array<{
+      artwork_id: string;
+      tx_type: string;
+      share_amount: string;
+      eth_amount: string;
+    }> = await this.dataSource.query(
+      `SELECT artwork_id, tx_type, share_amount, eth_amount
+       FROM transactions
+       WHERE user_id = $1 AND tx_type IN ('BUY', 'SELL')
+       ORDER BY timestamp ASC, id ASC`,
+      [userId],
+    );
+
+    const lots = new Map<string, { shares: Decimal; cost: Decimal }>();
+    let realized = new Decimal(0);
+
+    for (const tx of txs) {
+      const shares = new Decimal(tx.share_amount || '0');
+      const eth    = new Decimal(tx.eth_amount || '0');
+      const lot = lots.get(tx.artwork_id) ?? { shares: new Decimal(0), cost: new Decimal(0) };
+
+      if (tx.tx_type === 'BUY') {
+        lot.shares = lot.shares.plus(shares);
+        lot.cost   = lot.cost.plus(eth);
+      } else {
+        // SELL — average cost của số cổ phần đang giữ
+        const sold = Decimal.min(shares, lot.shares);
+        const avgCost = lot.shares.isZero() ? new Decimal(0) : lot.cost.div(lot.shares);
+        const costRemoved = avgCost.mul(sold);
+        realized = realized.plus(eth.sub(costRemoved));
+        lot.shares = lot.shares.sub(sold);
+        lot.cost   = Decimal.max(new Decimal(0), lot.cost.sub(costRemoved));
+      }
+      lots.set(tx.artwork_id, lot);
+    }
+
+    return realized;
   }
 
   // ─── getHoldings ──────────────────────────────────────────────────────────

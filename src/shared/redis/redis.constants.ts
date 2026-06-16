@@ -14,6 +14,11 @@ export const REDIS_KEYS = {
   // Artwork price cache
   artworkPrice: (id: string)      => `artwork:${id}:price`,
 
+  // Response cache (read-through)
+  cacheArtwork: (id: string)              => `cache:artwork:${id}`,
+  cacheVersion: (ns: string)              => `cache:ver:${ns}`,
+  cacheList:    (ns: string, ver: string, key: string) => `cache:${ns}:v${ver}:${key}`,
+
   // Leaderboard
   trending24h:  ()                => `trending:24h`,
   trendingWeek: ()                => `trending:7d`,
@@ -29,4 +34,6 @@ export const TTL = {
   JWT_BLACKLIST: 7 * 24 * 3600, // 7 ngay (bang JWT_EXPIRES_IN)
   PRICE_CACHE:  30,          // 30 giay (refresh khi co trade)
   RATE_WINDOW:  60,          // 1 phut sliding window
+  CACHE_DETAIL: 60,          // chi tiet artwork — invalidate khi trade/status change
+  CACHE_LIST:   30,          // marketplace listing — versioned + TTL ngan
 } as const;
