@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
+import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
 
 // Decimal.js config — match portfolio module precision
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_DOWN });
@@ -213,7 +214,80 @@ export class VaultService {
     });
   }
 
-  // ─── getTransactionHistory ────────────────────────────────────────────────
+  // ─── getTransactionHistoryCursor (keyset — production scale) ─────────────────
+
+  /**
+   * Lịch sử giao dịch theo keyset pagination — O(limit) ở mọi độ sâu.
+   * Dùng index (user_id, timestamp DESC). Tiebreaker theo id để ổn định khi
+   * nhiều giao dịch cùng timestamp (tránh nhảy/trùng dòng giữa các trang).
+   */
+  async getTransactionHistoryCursor(
+    userId: string,
+    limit = 20,
+    side?: 'buy' | 'sell',
+    cursor?: string,
+  ): Promise<CursorPage<VaultTransaction>> {
+    const decoded = decodeCursor(cursor);
+    const params: any[] = [userId];
+    const conds: string[] = ['t.user_id = $1'];
+
+    if (side) {
+      params.push(side.toUpperCase());
+      conds.push(`t.tx_type = $${params.length}`);
+    }
+    if (decoded) {
+      // keyset: chỉ lấy bản ghi "cũ hơn" cursor theo (timestamp, id) DESC
+      params.push(decoded.ts);
+      const tsIdx = params.length;
+      params.push(decoded.id);
+      const idIdx = params.length;
+      conds.push(`(t.timestamp, t.id) < ($${tsIdx}::timestamptz, $${idIdx}::uuid)`);
+    }
+    params.push(limit + 1); // +1 để biết còn trang sau không
+    const limitIdx = params.length;
+
+    const rows: any[] = await this.dataSource.query(
+      `SELECT t.id, t.tx_hash, t.tx_type,
+              t.share_amount::TEXT, t.eth_amount::TEXT,
+              t.price_per_share::TEXT, t.gas_fee::TEXT,
+              t.timestamp,
+              a.id AS artwork_id, a.title AS artwork_title,
+              COALESCE(a.ticker, '') AS artwork_ticker,
+              a.image_uri AS artwork_image_uri
+       FROM   transactions t
+       INNER  JOIN artworks a ON t.artwork_id = a.id
+       WHERE  ${conds.join(' AND ')}
+       ORDER  BY t.timestamp DESC, t.id DESC
+       LIMIT  $${limitIdx}`,
+      params,
+    );
+
+    const mapped: Array<VaultTransaction & { _id: string; _ts: Date }> = rows.map((r) => ({
+      id:                r.id,
+      tx_hash:           r.tx_hash,
+      tx_type:           r.tx_type,
+      artwork_id:        r.artwork_id,
+      artwork_title:     r.artwork_title,
+      artwork_ticker:    r.artwork_ticker,
+      artwork_image_uri: r.artwork_image_uri,
+      share_amount:      r.share_amount,
+      eth_amount:        r.eth_amount,
+      price_per_share:   r.price_per_share,
+      gas_fee:           r.gas_fee,
+      timestamp:         r.timestamp,
+      _id:               r.id,
+      _ts:               r.timestamp,
+    }));
+
+    const page = buildCursorPage(mapped, limit, (row) => ({ ts: row._ts, id: row._id }));
+    // strip internal keys khỏi payload trả về
+    return {
+      ...page,
+      data: page.data.map(({ _id, _ts, ...rest }) => rest),
+    };
+  }
+
+  // ─── getTransactionHistory (legacy OFFSET — giữ cho tương thích) ─────────────
 
   async getTransactionHistory(
     userId: string,

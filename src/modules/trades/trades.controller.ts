@@ -83,31 +83,25 @@ export class TradesController {
       'Trả về danh sách kèm artwork info, sorted DESC theo timestamp. ' +
       'Yêu cầu JWT Bearer token.',
   })
-  @ApiQuery({ name: 'page',  type: Number, required: false, example: 1 })
+  @ApiQuery({ name: 'cursor', type: String, required: false, description: 'Keyset cursor (production scale). Có cursor → bỏ qua page.' })
+  @ApiQuery({ name: 'page',  type: Number, required: false, example: 1, description: 'Legacy OFFSET' })
   @ApiQuery({ name: 'limit', type: Number, required: false, example: 20 })
   @ApiResponse({
     status: 200,
-    description: 'Lịch sử giao dịch của user có phân trang',
-    schema: {
-      example: {
-        data: [],
-        total: 0,
-        page: 1,
-        totalPages: 0,
-      },
-    },
+    description: 'Cursor mode: { data, next_cursor, has_more }. Legacy: { data, total, page, totalPages }.',
   })
   @ApiResponse({ status: 401, description: 'Chưa đăng nhập' })
   async getMyTransactionHistory(
     @CurrentUser() user: { sub: string },
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
   ) {
-    return this.tradesService.getUserTransactionHistory(
-      user.sub,
-      page,
-      Math.min(limit, 100),
-    );
+    const cappedLimit = Math.min(limit, 100);
+    if (cursor !== undefined) {
+      return this.tradesService.getUserTransactionHistoryCursor(user.sub, cappedLimit, cursor || undefined);
+    }
+    return this.tradesService.getUserTransactionHistory(user.sub, page, cappedLimit);
   }
 
   // ── GET /trades/:artworkId/ohlcv ──────────────────────────────────────────

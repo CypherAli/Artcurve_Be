@@ -62,15 +62,22 @@ export class ArtworksController {
       'Hỗ trợ sort theo price | created_at | view_count.',
   })
   @ApiQuery({ name: 'sortBy', enum: ['price', 'created_at', 'view_count', 'trending'], required: false })
+  @ApiQuery({ name: 'cursor', type: String, required: false, description: 'Keyset cursor (chỉ cho sortBy=created_at). Có cursor → infinite scroll, bỏ qua page.' })
   @ApiQuery({ name: 'page',   type: Number, required: false, example: 1 })
   @ApiQuery({ name: 'limit',  type: Number, required: false, example: 20 })
-  @ApiResponse({ status: 200, description: 'Danh sách artworks kèm thông tin creator' })
+  @ApiResponse({ status: 200, description: 'Cursor mode (created_at): { data, next_cursor, has_more }. Legacy: { data, total, page }.' })
   async getMarketplace(
     @Query('sortBy') sortBy: 'price' | 'created_at' | 'view_count' | 'trending' = 'created_at',
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cursor') cursor?: string,
   ) {
-    return this.artworksService.getMarketplace(sortBy, page, Math.min(limit, 100));
+    const cappedLimit = Math.min(limit, 100);
+    // Keyset infinite-scroll cho dòng "mới nhất" (sortBy mặc định created_at)
+    if (cursor !== undefined && sortBy === 'created_at') {
+      return this.artworksService.getMarketplaceCursor(cappedLimit, cursor || undefined);
+    }
+    return this.artworksService.getMarketplace(sortBy, page, cappedLimit);
   }
 
   // ─── GET /artworks/search — Full-text + filter ────────────────────────────

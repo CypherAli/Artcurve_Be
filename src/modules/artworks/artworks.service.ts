@@ -18,6 +18,7 @@ import {
 import { PinataService }  from './pinata.service';
 import { RedisService }   from '../../shared/redis/redis.service';
 import { REDIS_KEYS, TTL } from '../../shared/redis/redis.constants';
+import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
 
 // Namespace cho versioned marketplace list cache
 const CACHE_NS_MARKETPLACE = 'marketplace';
@@ -238,6 +239,38 @@ export class ArtworksService {
     const result = { data, total, page };
     await this.redisService.cacheSetJson(cacheKey, result, TTL.CACHE_LIST);
     return result;
+  }
+
+  /**
+   * Marketplace keyset (production scale) — sort created_at DESC, infinite scroll.
+   * O(limit) ở mọi độ sâu nhờ index (status, created_at). Tiebreaker id để ổn định.
+   */
+  async getMarketplaceCursor(
+    limit = 20,
+    cursor?: string,
+  ): Promise<CursorPage<Artwork>> {
+    const decoded = decodeCursor(cursor);
+
+    const qb = this.artworkRepo
+      .createQueryBuilder('artwork')
+      .leftJoin('artwork.creator', 'creator')
+      .select([...MARKETPLACE_COLS])
+      .where('artwork.status = :status', { status: ArtworkStatus.ACTIVE });
+
+    if (decoded) {
+      qb.andWhere(
+        '(artwork.created_at, artwork.id) < (:ts, :id)',
+        { ts: decoded.ts, id: decoded.id },
+      );
+    }
+
+    const rows = await qb
+      .orderBy('artwork.created_at', 'DESC')
+      .addOrderBy('artwork.id', 'DESC')
+      .take(limit + 1)
+      .getMany();
+
+    return buildCursorPage(rows, limit, (a) => ({ ts: a.created_at, id: a.id }));
   }
 
   /**

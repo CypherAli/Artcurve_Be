@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InfraClickHouseService, OhlcvTimeframe, OhlcvCandle } from '../../shared/clickhouse/clickhouse-infra.service';
 import { TransactionRepository } from './repositories/transaction.repository';
 import { DataSource } from 'typeorm';
+import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TradesService  (src/modules/trades/)
@@ -179,6 +180,47 @@ export class TradesService {
       page,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  // ── User Transaction History — keyset (production scale) ──────────────────
+
+  /**
+   * Keyset pagination cho lịch sử giao dịch user — O(limit) ở mọi độ sâu.
+   * Index (user_id, timestamp DESC); tiebreaker id để ổn định khi timestamp trùng.
+   */
+  async getUserTransactionHistoryCursor(
+    userId: string,
+    limit = 20,
+    cursor?: string,
+  ): Promise<CursorPage<any>> {
+    const decoded = decodeCursor(cursor);
+    const params: any[] = [userId];
+    let keysetCond = '';
+    if (decoded) {
+      params.push(decoded.ts);
+      const tsIdx = params.length;
+      params.push(decoded.id);
+      const idIdx = params.length;
+      keysetCond = `AND (t.timestamp, t.id) < ($${tsIdx}::timestamptz, $${idIdx}::uuid)`;
+    }
+    params.push(limit + 1);
+    const limitIdx = params.length;
+
+    const rows: any[] = await this.dataSource.query(
+      `SELECT t.id, t.tx_hash, t.tx_type,
+              t.share_amount, t.eth_amount, t.price_per_share, t.gas_fee,
+              t.block_number, t.timestamp, t.created_at,
+              a.id AS artwork_id, a.title AS artwork_title,
+              a.ticker AS artwork_ticker, a.image_uri AS artwork_image_uri
+       FROM   transactions t
+       INNER  JOIN artworks a ON t.artwork_id = a.id
+       WHERE  t.user_id = $1 ${keysetCond}
+       ORDER  BY t.timestamp DESC, t.id DESC
+       LIMIT  $${limitIdx}`,
+      params,
+    );
+
+    return buildCursorPage(rows, limit, (r) => ({ ts: r.timestamp, id: r.id }));
   }
 
   // ── Volume Stats ───────────────────────────────────────────────────────────

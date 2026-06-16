@@ -112,7 +112,8 @@ export class VaultController {
       'Lịch sử giao dịch của user kèm artwork info. ' +
       'Có thể filter theo side (buy/sell). Sorted DESC theo timestamp.',
   })
-  @ApiQuery({ name: 'page', type: Number, required: false, example: 1 })
+  @ApiQuery({ name: 'cursor', type: String, required: false, description: 'Keyset cursor (production scale). Nếu có → bỏ qua page.' })
+  @ApiQuery({ name: 'page', type: Number, required: false, example: 1, description: 'Legacy OFFSET pagination (dùng khi không có cursor)' })
   @ApiQuery({ name: 'limit', type: Number, required: false, example: 20 })
   @ApiQuery({
     name: 'side',
@@ -122,28 +123,22 @@ export class VaultController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Paginated transaction history',
-    schema: {
-      example: {
-        data: [],
-        total: 0,
-        page: 1,
-        totalPages: 0,
-      },
-    },
+    description: 'Transaction history. Cursor mode: { data, next_cursor, has_more }. Legacy: { data, total, page, totalPages }.',
   })
   async getTransactions(
     @CurrentUser() user: { id: string },
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('side') side?: 'buy' | 'sell',
+    @Query('cursor') cursor?: string,
   ) {
-    return this.vaultService.getTransactionHistory(
-      user.id,
-      page,
-      Math.min(limit, 100),
-      side,
-    );
+    const cappedLimit = Math.min(limit, 100);
+    // Keyset mode (production scale) khi client gửi cursor (kể cả lần đầu cursor rỗng + flag).
+    // Quy ước: nếu query có 'cursor' (dù rỗng "") → dùng keyset; ngược lại legacy page.
+    if (cursor !== undefined) {
+      return this.vaultService.getTransactionHistoryCursor(user.id, cappedLimit, side, cursor || undefined);
+    }
+    return this.vaultService.getTransactionHistory(user.id, page, cappedLimit, side);
   }
 
   // ── GET /vault/performance ────────────────────────────────────────────────
