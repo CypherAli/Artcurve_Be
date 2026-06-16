@@ -11,6 +11,7 @@ import { AllExceptionsFilter }     from './common/filters/all-exceptions.filter'
 import { TransformInterceptor }    from './common/interceptors/transform.interceptor'
 import { initSentry, closeSentry } from './common/observability/sentry.util'
 import { RedisIoAdapter }          from './common/adapters/redis-io.adapter'
+import { JsonLogger }              from './common/observability/json-logger'
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
@@ -23,6 +24,9 @@ async function bootstrap() {
   const config = app.get(ConfigService)
 
   const isProd = config.get('NODE_ENV') === 'production'
+
+  // Production: structured JSON logging cho log aggregator
+  if (isProd) app.useLogger(new JsonLogger())
 
   // ── Security headers (Helmet) ────────────────────────────────────
   app.use(

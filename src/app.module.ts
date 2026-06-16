@@ -1,8 +1,10 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule }   from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD }      from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerMiddleware, CorrelationIdMiddleware } from './app.middleware';
+import { MetricsModule }   from './modules/metrics/metrics.module';
+import { MetricsInterceptor } from './common/interceptors/metrics.interceptor';
 
 import { envValidationSchema } from './config/env.validation';
 
@@ -119,8 +121,9 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     SocialModule,
     ModerationModule,
 
-    // ⑧ Health checks
+    // ⑧ Health checks + metrics
     HealthModule,
+    MetricsModule,
 
     // ⑩ Live Streaming
     LiveModule,
@@ -137,6 +140,8 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
   providers: [
     // ThrottlerGuard áp dụng rate limit toàn cục; @SkipThrottle() để bypass ở endpoint cụ thể
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Ghi Prometheus metrics cho mọi HTTP request
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })
 export class AppModule implements NestModule {
