@@ -10,6 +10,7 @@ import { AppModule }               from './app.module'
 import { AllExceptionsFilter }     from './common/filters/all-exceptions.filter'
 import { TransformInterceptor }    from './common/interceptors/transform.interceptor'
 import { initSentry, closeSentry } from './common/observability/sentry.util'
+import { RedisIoAdapter }          from './common/adapters/redis-io.adapter'
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
@@ -94,6 +95,19 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter())
   app.useGlobalInterceptors(new TransformInterceptor())
   app.enableShutdownHooks()
+
+  // ── WebSocket horizontal scaling (Redis adapter) ──────────────────
+  // Có REDIS_URL → broadcast WS cross-instance; không có → adapter in-memory (1 instance).
+  const redisUrl = config.get<string>('REDIS_URL')
+  if (redisUrl) {
+    try {
+      const redisIoAdapter = new RedisIoAdapter(app)
+      await redisIoAdapter.connectToRedis(redisUrl)
+      app.useWebSocketAdapter(redisIoAdapter)
+    } catch (e) {
+      logger.warn(`Redis IO adapter skipped (fallback single-instance): ${(e as Error).message}`)
+    }
+  }
 
   // ── Swagger ───────────────────────────────────────────────────────
   if (config.get('NODE_ENV') !== 'production') {

@@ -1,5 +1,6 @@
 import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { CircuitBreaker, fetchWithTimeout } from '../../common/resilience/circuit-breaker';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ export class PinataService {
   private readonly apiKey:    string;
   private readonly secretKey: string;
   private readonly gateway:   string;
+  // Fail-fast khi Pinata sập — tránh treo request upload của user
+  private readonly breaker = new CircuitBreaker('Pinata', 5, 30_000);
 
   constructor(private readonly config: ConfigService) {
     this.apiKey    = config.get<string>('PINATA_API_KEY')    ?? '';
@@ -58,15 +61,17 @@ export class PinataService {
     formData.append('file', blob, filename);
     formData.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
 
-    const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-      method:  'POST',
-      headers: {
-        'pinata_api_key':        this.apiKey,
-        'pinata_secret_api_key': this.secretKey,
-        // KHÔNG set Content-Type — fetch tự đặt multipart/form-data với boundary
-      },
-      body: formData,
-    });
+    const res = await this.breaker.exec(() =>
+      fetchWithTimeout('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method:  'POST',
+        headers: {
+          'pinata_api_key':        this.apiKey,
+          'pinata_secret_api_key': this.secretKey,
+          // KHÔNG set Content-Type — fetch tự đặt multipart/form-data với boundary
+        },
+        body: formData,
+      }, 30_000),
+    );
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText);
@@ -94,15 +99,17 @@ export class PinataService {
       pinataContent:  metadata,
     };
 
-    const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-      method:  'POST',
-      headers: {
-        'Content-Type':          'application/json',
-        'pinata_api_key':        this.apiKey,
-        'pinata_secret_api_key': this.secretKey,
-      },
-      body: JSON.stringify(payload),
-    });
+    const res = await this.breaker.exec(() =>
+      fetchWithTimeout('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method:  'POST',
+        headers: {
+          'Content-Type':          'application/json',
+          'pinata_api_key':        this.apiKey,
+          'pinata_secret_api_key': this.secretKey,
+        },
+        body: JSON.stringify(payload),
+      }, 20_000),
+    );
 
     if (!res.ok) {
       const err = await res.text().catch(() => res.statusText);

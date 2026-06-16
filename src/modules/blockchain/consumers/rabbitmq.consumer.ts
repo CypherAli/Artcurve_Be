@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import { BlockchainEventConsumer } from './event.consumer';
+import { captureException } from '../../../common/observability/sentry.util';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  RabbitMQ Consumer — đồng bộ với ProducerService
@@ -21,6 +22,7 @@ import { BlockchainEventConsumer } from './event.consumer';
 
 const EXCHANGE = 'artcurve.blockchain';
 const DLX      = `${EXCHANGE}.dlx`;
+const DLQ      = `${EXCHANGE}.dlq`;   // queue gom message chết để quan sát/alert
 
 // Khớp chính xác với env.validation.ts defaults và producer.service.ts
 const QUEUES = {
@@ -66,7 +68,13 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
       await this.setupQueue(QUEUES.TRADE_EXECUTED,  ROUTING_KEYS.TRADE_EXECUTED);
       await this.setupQueue(QUEUES.GRADUATED,       ROUTING_KEYS.GRADUATED);
 
+      // DLQ: bind toàn bộ message chết từ DLX để quan sát (trước đây DLX không có
+      // queue → message chết bị mất, không ai biết).
+      await this.channel.assertQueue(DLQ, { durable: true });
+      await this.channel.bindQueue(DLQ, DLX, '#');
+
       await this.startConsumers();
+      await this.startDlqConsumer();
 
       this.connection.on('error', (err) => {
         this.logger.error(`RabbitMQ connection error: ${err.message}`);
@@ -127,6 +135,27 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
         this.eventConsumer.handleArtworkGraduated(payload),
       );
     });
+  }
+
+  /**
+   * Consumer cho DLQ — message đã fail hết retry. Không xử lý lại (tránh loop),
+   * chỉ LOG + gửi Sentry để alert + ack (xoá khỏi queue, tránh phình bộ nhớ).
+   * Đây là điểm quan sát poison message ở production.
+   */
+  private async startDlqConsumer(): Promise<void> {
+    await this.channel.consume(DLQ, (msg) => {
+      if (!msg) return;
+      const routingKey = msg.fields.routingKey;
+      const body = msg.content.toString().slice(0, 2000); // cắt tránh log khổng lồ
+      this.logger.error(`[DLQ] Dead-lettered message routingKey=${routingKey} body=${body}`);
+      captureException(new Error(`Blockchain DLQ message: ${routingKey}`), {
+        routing_key: routingKey,
+        body,
+        source: 'rabbitmq.dlq',
+      });
+      this.channel.ack(msg);
+    });
+    this.logger.log(`[RabbitMQ] DLQ consumer active on ${DLQ}`);
   }
 
   private async processMessage(
