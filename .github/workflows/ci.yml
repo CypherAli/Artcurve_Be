@@ -21,7 +21,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Run unit tests
-        run: npm test
+        run: npm test -- --ci --runInBand --forceExit
 
       - name: Build
         run: npm run build

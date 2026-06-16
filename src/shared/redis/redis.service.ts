@@ -1,6 +1,10 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CLIENT, REDIS_SUBSCRIBER, REDIS_KEYS, TTL } from './redis.constants';
+
+// Cửa sổ thời gian cho leaderboard (giây) — key tự hết hạn rồi rebuild → tránh
+// "trending 24h/7d" tích luỹ vô hạn (label sai + memory leak).
+const LEADERBOARD_TTL = { '24h': 24 * 3600, '7d': 7 * 24 * 3600 } as const;
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -28,7 +32,7 @@ export interface PriceUpdatedEvent {
 // ── RedisService ──────────────────────────────────────────────────────────────
 
 @Injectable()
-export class RedisService {
+export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
 
   // ── In-memory fallback when Redis is unavailable ──────────────────────────
@@ -38,6 +42,8 @@ export class RedisService {
   private readonly jwtBlacklist = new Map<string, number>()
   // Is Redis actually reachable?
   private redisReady = false
+  // Periodic prune cho in-memory fallback (chống unbounded growth ở dev mode)
+  private pruneTimer?: NodeJS.Timeout
 
   constructor(
     @Inject(REDIS_CLIENT)     private readonly redis: Redis,
@@ -48,6 +54,34 @@ export class RedisService {
     this.redis.on('error',        () => { this.redisReady = false })
     this.redis.on('close',        () => { this.redisReady = false })
     this.redis.on('reconnecting', () => { this.redisReady = false })
+
+    // Dọn entry hết hạn mỗi 60s khi đang dùng in-memory fallback.
+    // unref() để timer không giữ process sống khi shutdown.
+    this.pruneTimer = setInterval(() => this.pruneExpired(), 60_000)
+    this.pruneTimer.unref?.()
+  }
+
+  /** Cleanup khi app shutdown — hủy listener pub/sub + timer (tránh leak). */
+  async onModuleDestroy(): Promise<void> {
+    if (this.pruneTimer) clearInterval(this.pruneTimer)
+    this.priceCallbacks.clear()
+    this.graduatedCallbacks.clear()
+    try {
+      await this.sub.unsubscribe(
+        REDIS_KEYS.CHANNEL_PRICE_UPDATED,
+        REDIS_KEYS.CHANNEL_ARTWORK_GRADUATED,
+      )
+    } catch {
+      /* ignore — đang shutdown */
+    }
+  }
+
+  /** Xoá entry hết hạn khỏi các Map fallback in-memory. */
+  private pruneExpired(): void {
+    const now = Date.now()
+    for (const [k, v] of this.nonceStore)  if (now > v.expiresAt) this.nonceStore.delete(k)
+    for (const [k, exp] of this.jwtBlacklist) if (now > exp)      this.jwtBlacklist.delete(k)
+    for (const [k, v] of this.tempStore)   if (now > v.expiresAt) this.tempStore.delete(k)
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -180,15 +214,16 @@ export class RedisService {
   ): Promise<{ allowed: boolean; current: number; limit: number }> {
     const key = REDIS_KEYS.rateLimit(userId, action);
 
-    // Lua dung pipeline de atomic: INCR + EXPIRE trong 1 round-trip
-    const pipeline = this.redis.pipeline();
-    pipeline.incr(key);
-    pipeline.expire(key, windowSeconds);
-    const results = await pipeline.exec();
+    // Atomic Lua: INCR + set EXPIRE CHỈ khi key vừa được tạo (count==1).
+    // Tránh race của pipeline (INCR ok nhưng EXPIRE fail → key sống mãi → bucket
+    // không bao giờ reset → user bị chặn vĩnh viễn).
+    const script = `
+      local c = redis.call('INCR', KEYS[1])
+      if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+      return c
+    `;
+    const current = (await this.redis.eval(script, 1, key, String(windowSeconds))) as number;
 
-    const current = (results?.[0]?.[1] as number) ?? 0;
-
-    // Neu day la request dau tien (current == 1), EXPIRE vua duoc set
     return {
       allowed: current <= limit,
       current,
@@ -311,10 +346,21 @@ export class RedisService {
     const delta = parseFloat(ethAmount) || 0;
     if (delta <= 0) return;
 
-    await this.redis.pipeline()
-      .zincrby(REDIS_KEYS.trending24h(), delta, artworkId)
-      .zincrby(REDIS_KEYS.trendingWeek(), delta, artworkId)
-      .exec();
+    // ZINCRBY + set EXPIRE chỉ khi key mới tạo → set tự hết hạn sau cửa sổ rồi
+    // rebuild. "trending 24h/7d" do đó là rolling window thực sự thay vì tích luỹ
+    // vô hạn. Atomic qua Lua để TTL không bị bỏ sót.
+    const script = `
+      redis.call('ZINCRBY', KEYS[1], ARGV[1], ARGV[3])
+      if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[4]) end
+      redis.call('ZINCRBY', KEYS[2], ARGV[2], ARGV[3])
+      if redis.call('TTL', KEYS[2]) < 0 then redis.call('EXPIRE', KEYS[2], ARGV[5]) end
+    `;
+    await this.redis.eval(
+      script, 2,
+      REDIS_KEYS.trending24h(), REDIS_KEYS.trendingWeek(),
+      String(delta), String(delta), artworkId,
+      String(LEADERBOARD_TTL['24h']), String(LEADERBOARD_TTL['7d']),
+    );
   }
 
   /** Lay top N artwork theo volume (cho sort=trending) */

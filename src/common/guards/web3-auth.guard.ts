@@ -96,11 +96,11 @@ export class Web3AuthGuard implements CanActivate {
   private async handleWebSocket(context: ExecutionContext): Promise<boolean> {
     const client: Socket = context.switchToWs().getClient<Socket>();
 
-    // Ưu tiên đọc theo thứ tự: auth.token → header authorization → query.token
+    // Chỉ chấp nhận auth.token hoặc Authorization header.
+    // KHÔNG đọc từ query string — JWT trong URL bị log lại ở proxy/CDN/server logs.
     const token =
       client.handshake?.auth?.token                                  ||
       this.extractBearerToken(client.handshake?.headers?.authorization as string) ||
-      (client.handshake?.query?.token as string)                     ||
       null;
 
     if (!token) {

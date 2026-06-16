@@ -71,7 +71,19 @@ describe('ArtworksService', () => {
         { provide: getRepositoryToken(Transaction), useValue: { find: jest.fn(), save: jest.fn() } },
         { provide: DataSource, useValue: dataSource },
         { provide: PinataService, useValue: { pinFile: jest.fn(), pinJson: jest.fn() } },
-        { provide: RedisService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
+        {
+          provide: RedisService,
+          useValue: {
+            get: jest.fn(), set: jest.fn(), del: jest.fn(),
+            // Cache helpers — trả null/no-op để service đi thẳng xuống DB trong test
+            cacheGetJson:     jest.fn().mockResolvedValue(null),
+            cacheSetJson:     jest.fn().mockResolvedValue(undefined),
+            cacheDel:         jest.fn().mockResolvedValue(undefined),
+            cacheGetVersion:  jest.fn().mockResolvedValue('0'),
+            cacheBumpVersion: jest.fn().mockResolvedValue(undefined),
+            getLeaderboard:   jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
