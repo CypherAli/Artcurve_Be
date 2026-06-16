@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
+import { InfraClickHouseService } from '../../shared/clickhouse/clickhouse-infra.service';
 
 // Decimal.js config — match portfolio module precision
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_DOWN });
@@ -59,7 +60,10 @@ export interface PerformancePoint {
 export class VaultService {
   private readonly logger = new Logger(VaultService.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly ch: InfraClickHouseService,
+  ) {}
 
   // ─── getOverview ──────────────────────────────────────────────────────────
 
@@ -360,13 +364,16 @@ export class VaultService {
   // ─── getPerformance ───────────────────────────────────────────────────────
 
   /**
-   * Daily portfolio value snapshots over a time period.
-   * Since there's no snapshot table, we reconstruct from transactions:
-   * For each day in the period, calculate the portfolio value at end-of-day
-   * by replaying transactions up to that date against current artwork prices.
+   * Daily portfolio value snapshots — ĐỊNH GIÁ THEO GIÁ LỊCH SỬ (đúng).
    *
-   * Simplified approach: use current holdings value and walk backwards
-   * using daily transaction deltas. This avoids heavy historical price lookups.
+   * Với mỗi ngày D: value(D) = Σ_artwork ( shares_held(artwork, cuối ngày D)
+   *                                        × close_price(artwork, ngày D) ).
+   *   - shares_held: cộng dồn BUY(+)/SELL(−) tới hết ngày D từ transactions.
+   *   - close_price: nến đóng cửa 1d từ ClickHouse, forward-fill cho ngày không có trade,
+   *                  fallback current_price khi chưa có nến nào.
+   *
+   * Nếu ClickHouse hoàn toàn không có dữ liệu OHLCV (vd dev) → fallback sang
+   * cash-flow approximation (computePerformanceApprox) để không vỡ chart.
    */
   async getPerformance(
     userId: string,
@@ -376,7 +383,124 @@ export class VaultService {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
+    const now = new Date();
 
+    // Toàn bộ giao dịch BUY/SELL (cần full history để biết shares as-of mỗi ngày)
+    const txs: Array<{ artwork_id: string; tx_type: string; share_amount: string; timestamp: string }> =
+      await this.dataSource.query(
+        `SELECT artwork_id, tx_type, share_amount::TEXT, timestamp
+         FROM transactions
+         WHERE user_id = $1 AND tx_type IN ('BUY','SELL')
+         ORDER BY timestamp ASC`,
+        [userId],
+      );
+
+    if (!txs.length) {
+      return this.emptyPerformanceSeries(startDate);
+    }
+
+    const artworkIds = [...new Set(txs.map((t) => t.artwork_id))];
+
+    // Nến đóng cửa hằng ngày — lấy cửa sổ rộng (1 năm trước startDate) để forward-fill
+    const histStart = new Date(startDate);
+    histStart.setFullYear(histStart.getFullYear() - 1);
+
+    const closesByArt = new Map<string, Array<{ day: string; close: Decimal }>>();
+    let totalCandles = 0;
+    await Promise.all(
+      artworkIds.map(async (id) => {
+        try {
+          const candles = await this.ch.getOHLCVData(id, '1d', histStart, now, 500);
+          totalCandles += candles.length;
+          closesByArt.set(
+            id,
+            candles.map((c) => ({ day: c.bucket.slice(0, 10), close: new Decimal(c.close || '0') })),
+          );
+        } catch {
+          closesByArt.set(id, []);
+        }
+      }),
+    );
+
+    // Không có OHLCV nào → fallback approximation
+    if (totalCandles === 0) {
+      return this.computePerformanceApprox(userId, startDate);
+    }
+
+    // current_price làm giá fallback khi ngày D nằm trước nến đầu tiên
+    const priceRows: Array<{ id: string; current_price: string }> = await this.dataSource.query(
+      `SELECT id, current_price::TEXT AS current_price FROM artworks WHERE id = ANY($1)`,
+      [artworkIds],
+    );
+    const fallbackPrice = new Map<string, Decimal>(
+      priceRows.map((r) => [r.id, new Decimal(r.current_price || '0')]),
+    );
+
+    // Danh sách ngày tăng dần
+    const dayList: string[] = [];
+    for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+      dayList.push(d.toISOString().slice(0, 10));
+    }
+
+    // Con trỏ tiến dần (merge) để giữ O(days + txs + candles)
+    const sharesByArt = new Map<string, Decimal>();
+    const closePtr = new Map<string, number>();
+    const lastClose = new Map<string, Decimal>();
+    let txPtr = 0;
+
+    const points: PerformancePoint[] = [];
+    for (const day of dayList) {
+      // Áp dụng mọi giao dịch tới hết ngày D
+      while (txPtr < txs.length && txs[txPtr].timestamp.slice(0, 10) <= day) {
+        const tx = txs[txPtr];
+        const delta = new Decimal(tx.share_amount || '0');
+        const prev = sharesByArt.get(tx.artwork_id) ?? new Decimal(0);
+        sharesByArt.set(tx.artwork_id, tx.tx_type === 'BUY' ? prev.plus(delta) : prev.sub(delta));
+        txPtr++;
+      }
+
+      let value = new Decimal(0);
+      for (const id of artworkIds) {
+        const sh = sharesByArt.get(id);
+        if (!sh || sh.lte(0)) continue;
+
+        // forward-fill giá đóng cửa <= day
+        const closes = closesByArt.get(id) ?? [];
+        let ptr = closePtr.get(id) ?? 0;
+        while (ptr < closes.length && closes[ptr].day <= day) {
+          lastClose.set(id, closes[ptr].close);
+          ptr++;
+        }
+        closePtr.set(id, ptr);
+
+        const price = lastClose.get(id) ?? fallbackPrice.get(id) ?? new Decimal(0);
+        value = value.plus(sh.mul(price));
+      }
+      points.push({ date: day, value_eth: value.toFixed(8) });
+    }
+
+    return points;
+  }
+
+  /** Chuỗi giá trị 0 cho user chưa có giao dịch. */
+  private emptyPerformanceSeries(startDate: Date): PerformancePoint[] {
+    const now = new Date();
+    const points: PerformancePoint[] = [];
+    for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+      points.push({ date: d.toISOString().slice(0, 10), value_eth: '0.00000000' });
+    }
+    return points;
+  }
+
+  /**
+   * FALLBACK — cash-flow approximation (dùng khi ClickHouse chưa có OHLCV).
+   * value(day-1) ≈ value(day) − net_flow(day). Không phản ánh biến động giá của
+   * cổ phần đang giữ, nên chỉ dùng khi không có dữ liệu giá lịch sử.
+   */
+  private async computePerformanceApprox(
+    userId: string,
+    startDate: Date,
+  ): Promise<PerformancePoint[]> {
     // Get daily net ETH flow from transactions (buy = negative, sell = positive)
     const dailyFlows: Array<{ day: string; net_eth: string }> =
       await this.dataSource.query(
