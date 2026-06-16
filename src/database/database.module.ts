@@ -14,6 +14,9 @@ import { Notification }     from '../modules/notifications/entities/notification
 import { ChatSession }      from '../modules/chat/entities/chat-session.entity';
 import { ChatMessage }      from '../modules/chat/entities/chat-message.entity';
 import { EscalationTicket } from '../modules/chat/entities/escalation-ticket.entity';
+import { Guild }           from '../modules/guild/entities/guild.entity';
+import { GuildMember }     from '../modules/guild/entities/guild-member.entity';
+import { GuildMessage }    from '../modules/guild/entities/guild-message.entity';
 
 @Module({
   imports: [
@@ -54,6 +57,9 @@ import { EscalationTicket } from '../modules/chat/entities/escalation-ticket.ent
             ChatSession,
             ChatMessage,
             EscalationTicket,
+            Guild,
+            GuildMember,
+            GuildMessage,
           ],
 
           migrations: [__dirname + '/migrations/*{.ts,.js}'],
