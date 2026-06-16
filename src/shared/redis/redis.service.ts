@@ -22,6 +22,7 @@ export interface PriceUpdatedEvent {
   is_buy?:      boolean;
   user_wallet?: string;
   share_amount?: string;
+  eth_amount?:  string;   // ETH của riêng giao dịch này (KHÁC volume_24h tích luỹ)
 }
 
 // ── RedisService ──────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
 import { LiveStream }      from './entities/live-stream.entity';
 import { CreateStreamDto } from './dto/create-stream.dto';
 import { RedisService }    from '../../shared/redis/redis.service';
+import { randomUUID }      from 'crypto';
 
 @Injectable()
 export class LiveService {
@@ -79,7 +80,8 @@ export class LiveService {
       throw new ConflictException('You already have an active stream');
     }
 
-    const roomName = `stream-${hostId.slice(0, 8)}-${Date.now()}`;
+    // randomUUID đảm bảo không trùng room name kể cả khi cùng host start 2 stream cùng lúc
+    const roomName = `stream-${hostId.slice(0, 8)}-${randomUUID()}`;
 
     // Tạo room trên LiveKit Cloud
     if (this.serverUrl) {

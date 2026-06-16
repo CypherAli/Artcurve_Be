@@ -16,4 +16,7 @@ RUN test -f dist/main.js && echo "dist/main.js exists" || (echo "BUILD FAILED: d
 
 EXPOSE 3001
 
+# Chạy bằng user không phải root (image node:alpine có sẵn user `node`) — giảm blast radius nếu app bị exploit
+USER node
+
 CMD ["node", "dist/main"]

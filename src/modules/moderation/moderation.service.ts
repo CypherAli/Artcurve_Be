@@ -35,15 +35,22 @@ export class ModerationService {
     let reason  = 'Auto-approved (no moderation API configured)'
     let score   = 0
 
-    if (apiKey && imageUrl) {
+    // Resolve ipfs:// → https gateway để OpenAI fetch được ảnh
+    const resolvedUrl = imageUrl?.startsWith('ipfs://')
+      ? imageUrl.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')
+      : imageUrl
+
+    if (apiKey && resolvedUrl?.startsWith('http')) {
       try {
-        // OpenAI Moderation API — input phải là text mô tả, không phải URL
-        // Dùng imageUrl làm text mô tả (nếu là IPFS URI thì gửi URI string)
-        // Để check image thật cần Vision API; moderation API chỉ nhận text
+        // omni-moderation-latest hỗ trợ multimodal: check trực tiếp nội dung ẢNH
+        // qua image_url (model cũ text-moderation chỉ nhận text → vô dụng với artwork)
         const response = await firstValueFrom(
           this.httpService.post(
             'https://api.openai.com/v1/moderations',
-            { input: `Artwork image: ${imageUrl}` },
+            {
+              model: 'omni-moderation-latest',
+              input: [{ type: 'image_url', image_url: { url: resolvedUrl } }],
+            },
             { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } },
           ),
         )

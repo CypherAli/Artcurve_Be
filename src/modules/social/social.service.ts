@@ -1,6 +1,6 @@
 import { Injectable, ConflictException, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, DataSource } from 'typeorm'
+import { Repository, DataSource, QueryFailedError } from 'typeorm'
 import { Follower }         from './entities/follower.entity'
 import { SocialInteraction } from './entities/social-interaction.entity'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -64,7 +64,16 @@ export class SocialService {
       where: { user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' },
     })
     if (existing) throw new ConflictException('Đã like rồi.')
-    await this.interactionRepo.save({ user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' })
+    try {
+      await this.interactionRepo.save({ user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' })
+    } catch (err) {
+      // Race: 2 request like đồng thời → unique constraint chặn bản ghi thứ 2.
+      // Coi như đã like (idempotent) thay vì trả 500.
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        throw new ConflictException('Đã like rồi.')
+      }
+      throw err
+    }
   }
 
   async unlikeArtwork(userId: string, artworkId: string): Promise<void> {

@@ -3,7 +3,9 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { QueryFailedError } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Guild } from './entities/guild.entity';
@@ -92,7 +94,17 @@ export class GuildService {
       user_id: userId,
       role: GuildRole.MEMBER,
     });
-    await this.memberRepo.save(member);
+
+    // Atomic guard chống race: nếu 2 request đồng thời, unique constraint
+    // (guild_id, user_id) sẽ chặn bản ghi thứ 2 → chỉ increment khi insert thành công.
+    try {
+      await this.memberRepo.save(member);
+    } catch (err) {
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        throw new ConflictException('Already a member');
+      }
+      throw err;
+    }
     await this.guildRepo.increment({ id: guildId }, 'member_count', 1);
 
     return { joined: true };
@@ -134,6 +146,14 @@ export class GuildService {
     content: string,
   ) {
     await this.getGuild(guildId); // ensure exists
+
+    // Chỉ thành viên của guild mới được post — chống user ngoài spam vào guild
+    const membership = await this.memberRepo.findOne({
+      where: { guild_id: guildId, user_id: userId },
+    });
+    if (!membership) {
+      throw new ForbiddenException('Bạn phải là thành viên của guild để gửi tin nhắn');
+    }
 
     const msg = this.messageRepo.create({
       guild_id: guildId,

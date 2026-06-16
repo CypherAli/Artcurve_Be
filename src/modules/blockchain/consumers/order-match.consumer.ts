@@ -244,6 +244,7 @@ export class OrderMatchConsumer implements OnModuleInit {
       is_buy:         side === 'buy',
       user_wallet:    result.user_wallet,
       share_amount:   filled_amount,
+      eth_amount,
     });
 
     // 6. Broadcast trade event to authenticated WebSocket clients

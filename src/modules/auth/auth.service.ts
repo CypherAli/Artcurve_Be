@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SiweMessage } from 'siwe';
 import { v4 as uuidv4 } from 'uuid';
-import { createHash, createHmac, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from '../../shared/redis/redis.service';
 
@@ -422,7 +422,15 @@ export class AuthService {
     const secretKey  = createHash('sha256').update(botToken).digest();
     const computed   = createHmac('sha256', secretKey).update(checkStr).digest('hex');
 
-    if (computed !== hash) throw new UnauthorizedException('Telegram auth hash mismatch');
+    // Constant-time comparison để chống timing attack
+    const computedBuf = Buffer.from(computed, 'hex');
+    const hashBuf     = hash ? Buffer.from(hash, 'hex') : Buffer.alloc(0);
+    if (
+      computedBuf.length !== hashBuf.length ||
+      !timingSafeEqual(computedBuf, hashBuf)
+    ) {
+      throw new UnauthorizedException('Telegram auth hash mismatch');
+    }
 
     // 2. Validate auth_date — chỉ chấp nhận trong vòng 5 phút (300s).
     //    86400s (1 ngày) quá rộng — cho phép replay token cũ cả ngày.
