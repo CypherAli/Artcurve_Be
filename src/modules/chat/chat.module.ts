@@ -6,6 +6,11 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ArtworksModule } from '../artworks/artworks.module';
 import { VaultModule } from '../vault/vault.module';
 import { GuildModule } from '../guild/guild.module';
+import { TradesModule } from '../trades/trades.module';
+import { SocialModule } from '../social/social.module';
+import { LiveModule } from '../live/live.module';
+import { UsersModule } from '../users/users.module';
+import { PortfolioModule } from '../portfolio/portfolio.module';
 import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { EscalationTicket } from './entities/escalation-ticket.entity';
@@ -25,6 +30,11 @@ import { ChatGateway } from './chat.gateway';
     ArtworksModule,
     VaultModule,
     GuildModule,
+    TradesModule,
+    SocialModule,
+    LiveModule,
+    UsersModule,
+    PortfolioModule,
   ],
   providers: [ChatService, GeminiService, ChatToolsService, EscalationService, ChatGateway],
   controllers: [ChatController],
