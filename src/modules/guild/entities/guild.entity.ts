@@ -32,6 +32,16 @@ export class Guild {
   @Column({ type: 'int', default: 1 })
   member_count: number;
 
+  @Column({ type: 'int', default: 1 })
+  level: number;
+
+  @Column({ type: 'int', default: 30, name: 'max_members' })
+  max_members: number;
+
+  // 'auto' = duyệt tự động · 'manual' = chủ guild duyệt tay
+  @Column({ type: 'varchar', length: 10, default: 'auto' })
+  acceptance: string;
+
   @Column({ type: 'varchar', length: 7, nullable: true })
   avatar_color: string;
 

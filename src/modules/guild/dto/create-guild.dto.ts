@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsInt, Min, Max, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateGuildDto {
@@ -19,4 +19,16 @@ export class CreateGuildDto {
   @IsNotEmpty()
   @MaxLength(32)
   focus: string;
+
+  @ApiPropertyOptional({ description: 'Số thành viên tối đa (8–100)', default: 30 })
+  @IsOptional()
+  @IsInt()
+  @Min(8)
+  @Max(100)
+  max_members?: number;
+
+  @ApiPropertyOptional({ description: "Chế độ duyệt: 'auto' | 'manual'", default: 'auto' })
+  @IsOptional()
+  @IsIn(['auto', 'manual'])
+  acceptance?: 'auto' | 'manual';
 }

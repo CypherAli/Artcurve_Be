@@ -40,6 +40,9 @@ export class GuildService {
       focus: dto.focus,
       creator_id: userId,
       member_count: 1,
+      level: 1,
+      max_members: dto.max_members ?? 30,
+      acceptance: dto.acceptance ?? 'auto',
       avatar_color: randomColor(),
     });
     const saved = await this.guildRepo.save(guild);
@@ -55,10 +58,25 @@ export class GuildService {
     return saved;
   }
 
-  // ── List all guilds ───────────────────────────────────────────────────────
+  // ── List all guilds (kèm khối lượng giao dịch 7 ngày của thành viên) ───────
 
   async listGuilds() {
-    return this.guildRepo.find({ order: { member_count: 'DESC' } });
+    // weekly_volume_eth = tổng eth_amount của giao dịch các thành viên trong 7 ngày.
+    // t.user_id = gm.user_id nên mỗi giao dịch chỉ được cộng đúng 1 lần / guild.
+    const { entities, raw } = await this.guildRepo
+      .createQueryBuilder('g')
+      .leftJoin('guild_members', 'gm', 'gm.guild_id = g.id')
+      .leftJoin('transactions', 't',
+        "t.user_id = gm.user_id AND t.timestamp > NOW() - INTERVAL '7 days'")
+      .addSelect('COALESCE(SUM(CAST(t.eth_amount AS DECIMAL(38,18))), 0)', 'weekly_volume_eth')
+      .groupBy('g.id')
+      .orderBy('g.member_count', 'DESC')
+      .getRawAndEntities();
+
+    return entities.map((g, i) => ({
+      ...g,
+      weekly_volume_eth: Number(raw[i]?.weekly_volume_eth ?? 0),
+    }));
   }
 
   // ── My guilds ─────────────────────────────────────────────────────────────
