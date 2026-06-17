@@ -82,7 +82,8 @@ export class ChatService {
 
     const history = await this.getRecentMessages(session.id);
 
-    const aiResponse = await this.gemini.chat(dto.content, history);
+    // Truyền userId để các account-tool (portfolio/holdings) gắn đúng user đăng nhập
+    const aiResponse = await this.gemini.chat(dto.content, history, { userId });
 
     const aiMsg = this.msgRepo.create({
       session_id: session.id,

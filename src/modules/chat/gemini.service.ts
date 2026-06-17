@@ -2,16 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { ChatToolsService, type ToolContext } from './chat-tools.service';
 
 export interface GeminiResponse {
   text: string;
   shouldEscalate: boolean;
 }
 
+// Part có thể là text, functionCall (model gọi tool), hoặc functionResponse (kết quả tool)
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args?: Record<string, unknown> } }
+  | { functionResponse: { name: string; response: Record<string, unknown> } };
+
 interface GeminiContent {
   role: 'user' | 'model';
-  parts: { text: string }[];
+  parts: GeminiPart[];
 }
+
+// Số vòng tool tối đa cho 1 lượt chat (chống loop vô hạn)
+const MAX_TOOL_ROUNDS = 5;
 
 const SYSTEM_PROMPT = `You are ArtCurve Support — a knowledgeable, friendly member of the ArtCurve team. You are NOT an AI assistant — you are "ArtCurve Support". Never refer to yourself as AI, bot, language model, or assistant. Speak as a real support team member.
 
@@ -61,6 +71,7 @@ export class GeminiService {
   constructor(
     private readonly http: HttpService,
     private readonly config: ConfigService,
+    private readonly tools: ChatToolsService,
   ) {
     this.apiKey = this.config.get<string>('GEMINI_API_KEY', '');
     this.endpoint =
@@ -70,6 +81,7 @@ export class GeminiService {
   async chat(
     userMessage: string,
     history: { sender: string; content: string }[],
+    ctx: ToolContext = {},
   ): Promise<GeminiResponse> {
     if (!this.apiKey) {
       this.logger.warn('GEMINI_API_KEY not configured — returning fallback response');
@@ -80,47 +92,56 @@ export class GeminiService {
     }
 
     const contents: GeminiContent[] = [];
-
-    const recentHistory = history.slice(-20);
-    for (const msg of recentHistory) {
+    for (const msg of history.slice(-20)) {
       contents.push({
         role: msg.sender === 'user' ? 'user' : 'model',
         parts: [{ text: msg.content }],
       });
     }
-
     contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
+    const body = {
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents,
+      tools: [{ functionDeclarations: this.tools.declarations }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+    };
+
     try {
-      const response = await firstValueFrom(
-        this.http.post(
-          `${this.endpoint}?key=${this.apiKey}`,
-          {
-            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents,
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 1024,
-            },
-          },
-          {
+      // Vòng lặp tool-calling: model có thể gọi nhiều tool trước khi trả lời.
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        const response = await firstValueFrom(
+          this.http.post(`${this.endpoint}?key=${this.apiKey}`, body, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 30_000,
-          },
-        ),
-      );
+          }),
+        );
 
-      const text =
-        response.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const parts: GeminiPart[] = response.data?.candidates?.[0]?.content?.parts ?? [];
+        const calls = parts.filter((p): p is Extract<GeminiPart, { functionCall: any }> => 'functionCall' in p);
 
-      const shouldEscalate = text.includes('[ESCALATE]');
-      const cleanText = text.replace(/\[ESCALATE\]/g, '').trim();
+        // Không còn tool call → trả lời cuối cùng
+        if (calls.length === 0) {
+          const text = parts.map((p) => ('text' in p ? p.text : '')).join('').trim();
+          const shouldEscalate = text.includes('[ESCALATE]');
+          const cleanText = text.replace(/\[ESCALATE\]/g, '').trim();
+          this.logger.log(`Gemini reply (round ${round}): ${cleanText.slice(0, 80)}... escalate=${shouldEscalate}`);
+          return { text: cleanText || 'Xin lỗi, mình chưa có câu trả lời phù hợp.', shouldEscalate };
+        }
 
-      this.logger.log(
-        `Gemini response: ${cleanText.slice(0, 80)}... escalate=${shouldEscalate}`,
-      );
+        // Ghi lại lượt model (chứa functionCall) rồi chạy tool và gửi kết quả về
+        contents.push({ role: 'model', parts });
+        const responseParts: GeminiPart[] = [];
+        for (const c of calls) {
+          const result = await this.tools.execute(c.functionCall.name, c.functionCall.args ?? {}, ctx);
+          this.logger.debug(`tool ${c.functionCall.name} → ${JSON.stringify(result).slice(0, 120)}`);
+          responseParts.push({ functionResponse: { name: c.functionCall.name, response: result } });
+        }
+        contents.push({ role: 'user', parts: responseParts });
+      }
 
-      return { text: cleanText, shouldEscalate };
+      this.logger.warn('Gemini exceeded MAX_TOOL_ROUNDS');
+      return { text: 'Mình cần thêm thời gian để tra cứu — bạn thử hỏi lại cụ thể hơn nhé.', shouldEscalate: false };
     } catch (err: any) {
       this.logger.error(`Gemini API error: ${err.message}`);
       return {

@@ -436,10 +436,16 @@ export class VaultService {
       priceRows.map((r) => [r.id, new Decimal(r.current_price || '0')]),
     );
 
-    // Danh sách ngày tăng dần
+    // Danh sách ngày (UTC) tăng dần — neo theo UTC để khớp với bucket OHLCV và
+    // timestamp giao dịch (đều là UTC ISO). Nếu trộn local-midnight + toISOString
+    // thì ở múi giờ +N, "hôm nay" bị lệch -1 ngày → giá lịch sử không khớp.
     const dayList: string[] = [];
-    for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
-      dayList.push(d.toISOString().slice(0, 10));
+    const cursor = new Date();
+    cursor.setUTCHours(0, 0, 0, 0);
+    cursor.setUTCDate(cursor.getUTCDate() - days);
+    for (let i = 0; i <= days; i++) {
+      dayList.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     // Con trỏ tiến dần (merge) để giữ O(days + txs + candles)

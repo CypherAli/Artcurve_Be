@@ -89,7 +89,7 @@ describe('ChatService', () => {
       expect(result.userMsg.sender).toBe('user');
       expect(result.aiMsg.sender).toBe('ai');
       expect(result.aiMsg.content).toBe('AI response');
-      expect(gemini.chat).toHaveBeenCalledWith('Hello', []);
+      expect(gemini.chat).toHaveBeenCalledWith('Hello', [], { userId: 'user-1' });
     });
 
     it('should throw if session_id belongs to another user', async () => {
