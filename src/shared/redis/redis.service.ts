@@ -487,6 +487,16 @@ export class RedisService implements OnModuleDestroy {
     if (keys.length > 0) await this.redis.del(...keys);
   }
 
+  /** INCR — atomic increment, trả về giá trị sau khi tăng */
+  async increment(key: string): Promise<number> {
+    return this.redis.incr(key);
+  }
+
+  /** EXPIRE — set TTL (giây) cho key */
+  async expire(key: string, seconds: number): Promise<void> {
+    await this.redis.expire(key, seconds);
+  }
+
   /** Scan keys matching pattern (dùng cho refresh token lookup) */
   async scanKeys(pattern: string, count = 100): Promise<string[]> {
     const results: string[] = [];

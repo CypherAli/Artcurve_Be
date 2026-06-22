@@ -81,8 +81,8 @@ export class ArtworksService {
    * Ticker được auto-generate từ title nếu frontend không truyền.
    */
   async createDraftArtwork(creatorId: string, dto: CreateArtworkDto): Promise<Artwork> {
-    // Dedup: DRAFT cùng creator + cùng title trong 60 giây → chặn double-submit
-    const sixtySecondsAgo = new Date(Date.now() - 60_000);
+    // Dedup: DRAFT cùng creator + cùng title trong 24h → chặn double-submit
+    const sixtySecondsAgo = new Date(Date.now() - 86_400_000);
     const recentDuplicate = await this.artworkRepo
       .createQueryBuilder('artwork')
       .where('artwork.creator_id = :creatorId', { creatorId })

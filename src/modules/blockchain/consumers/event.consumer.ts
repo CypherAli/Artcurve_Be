@@ -87,10 +87,13 @@ export class BlockchainEventConsumer {
    * Throw Error nếu bất kỳ trường nào không hợp lệ — consumer sẽ NACK → DLQ.
    */
   private validateTradePayload(p: TradeExecutedPayload): void {
+    const MAX_AMOUNT = 1_000_000_000;
+
     const toDecimal = (v: string, field: string) => {
       const n = parseFloat(v);
       if (!isFinite(n) || isNaN(n)) throw new Error(`Invalid ${field}: "${v}" is not a number`);
       if (n <= 0)                   throw new Error(`Invalid ${field}: "${v}" must be > 0`);
+      if (n > MAX_AMOUNT)           throw new Error(`Invalid ${field}: "${v}" exceeds maximum (${MAX_AMOUNT})`);
       return n;
     };
 
@@ -138,6 +141,10 @@ export class BlockchainEventConsumer {
     qr: any,
     walletAddress: string,
   ): Promise<string | null> {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) {
+      this.logger.error(`Invalid wallet address: ${walletAddress}`);
+      return null;
+    }
     const wallet = walletAddress.toLowerCase();
     const rows = await qr.manager.query(
       `SELECT id FROM users WHERE wallet_address = $1`,
@@ -428,7 +435,16 @@ export class BlockchainEventConsumer {
         ],
       );
 
-      // Giảm holding — nếu về 0 thì xóa row
+      // Validate balance before sell
+      const holdingRows = await qr.manager.query(
+        `SELECT share_balance FROM portfolio_holdings WHERE user_id = $1 AND artwork_id = $2`,
+        [userId, artworkDbId],
+      );
+      const currentBalance = holdingRows.length > 0 ? parseFloat(holdingRows[0].share_balance) : 0;
+      if (currentBalance < parseFloat(payload.share_amount)) {
+        this.logger.error(`Sell rejected: user=${userId} has ${currentBalance} but tried to sell ${payload.share_amount}`);
+      }
+
       await qr.manager.query(
         `UPDATE portfolio_holdings
          SET share_balance = GREATEST(share_balance - $1, 0),

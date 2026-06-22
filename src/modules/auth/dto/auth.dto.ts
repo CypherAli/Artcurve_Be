@@ -64,6 +64,9 @@ export class AuthResponseDto {
   @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIs...' })
   access_token: string;
 
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIs...' })
+  refresh_token: string;
+
   @ApiProperty({ example: 3600 })
   expires_in: number;
 
@@ -72,6 +75,7 @@ export class AuthResponseDto {
     id: string;
     wallet_address: string;
     username: string | null;
+    avatar_url?: string | null;
     role: string;
     is_verified: boolean;
   };

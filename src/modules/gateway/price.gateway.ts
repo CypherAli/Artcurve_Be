@@ -75,18 +75,29 @@ export class PriceGateway
    * Non-blocking: Redis có thể chưa sẵn sàng trong dev environment.
    */
   async onModuleInit(): Promise<void> {
-    Promise.all([
-      this.redisService.subscribePriceUpdates(
-        (event: PriceUpdatedEvent) => this.broadcastPriceUpdate(event),
-      ),
-      this.redisService.subscribeArtworkGraduated(
-        (artworkId: string) => this.broadcastGraduated(artworkId),
-      ),
-    ]).then(() => {
+    this.subscribeWithRetry();
+  }
+
+  private async subscribeWithRetry(attempt = 1): Promise<void> {
+    try {
+      await Promise.all([
+        this.redisService.subscribePriceUpdates(
+          (event: PriceUpdatedEvent) => this.broadcastPriceUpdate(event),
+        ),
+        this.redisService.subscribeArtworkGraduated(
+          (artworkId: string) => this.broadcastGraduated(artworkId),
+        ),
+      ]);
       this.logger.log('Subscribed to Redis price and graduation channels');
-    }).catch((e) => {
-      this.logger.warn(`Redis subscribe skipped: ${(e as Error).message}`);
-    });
+    } catch (e) {
+      const delay = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+      this.logger.warn(`Redis subscribe failed (attempt ${attempt}), retrying in ${delay}ms: ${(e as Error).message}`);
+      if (attempt < 10) {
+        setTimeout(() => this.subscribeWithRetry(attempt + 1), delay);
+      } else {
+        this.logger.error('Redis subscribe failed after 10 attempts — price updates will not be broadcast');
+      }
+    }
   }
 
   // ── Event Handlers (Client -> Server) ─────────────────────────────────────

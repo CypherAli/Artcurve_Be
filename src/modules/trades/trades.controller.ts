@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Param,
   Query,
   ParseIntPipe,
@@ -46,6 +47,7 @@ export class TradesController {
 
   @Get('recent')
   @Public()
+  @Header('Cache-Control', 'public, max-age=5, stale-while-revalidate=10')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Giao dịch gần nhất toàn sàn — dùng cho Live Activity feed' })
   @ApiQuery({ name: 'limit', type: Number, required: false })
@@ -58,6 +60,7 @@ export class TradesController {
 
   @Get('leaderboard')
   @Public()
+  @Header('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Top artworks theo volume 7 ngày',
@@ -108,6 +111,7 @@ export class TradesController {
 
   @Get(':artworkId/ohlcv')
   @Public()
+  @Header('Cache-Control', 'public, max-age=15, stale-while-revalidate=30')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Lấy OHLCV candles cho candlestick chart',

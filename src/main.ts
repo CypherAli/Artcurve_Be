@@ -150,12 +150,21 @@ async function bootstrap() {
     logger.log(`Swagger UI: http://localhost:${config.get('PORT') ?? 3001}/api/docs`)
   }
 
-  // Graceful shutdown — flush Sentry + đóng connection trong giới hạn thời gian
-  // để Render/K8s không SIGKILL giữa chừng (drain trong ~10s).
+  // Global error handlers — catch async errors outside HTTP context
+  process.on('unhandledRejection', (reason) => {
+    logger.error(`Unhandled Rejection: ${reason}`)
+  })
+  process.on('uncaughtException', (err) => {
+    logger.error(`Uncaught Exception: ${err.message}`, err.stack)
+    void closeSentry(2000).then(() => process.exit(1))
+  })
+
+  // Graceful shutdown — drain in-flight requests before closing
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, () => {
-      logger.log(`Received ${signal} — shutting down gracefully`)
+      logger.log(`Received ${signal} — draining connections (5s)`)
       void (async () => {
+        await new Promise(r => setTimeout(r, 5000))
         await app.close()
         await closeSentry(2000)
         process.exit(0)

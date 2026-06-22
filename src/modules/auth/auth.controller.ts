@@ -126,6 +126,7 @@ export class AuthController {
 
   @Get('google/callback')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Google OAuth 2.0 — callback & issue JWT' })
   async googleCallback(
     @Query('code')  code:  string,
@@ -188,6 +189,7 @@ export class AuthController {
 
   @Get('github/callback')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'GitHub OAuth — callback & issue JWT' })
   async githubCallback(
     @Query('code')  code:  string,

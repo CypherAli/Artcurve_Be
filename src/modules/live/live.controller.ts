@@ -7,6 +7,7 @@ import { Request } from 'express';
 import {
   ApiTags, ApiOperation, ApiBearerAuth, ApiBody, ApiQuery,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { LiveService }     from './live.service';
 import { CreateStreamDto } from './dto/create-stream.dto';
@@ -24,6 +25,7 @@ export class LiveController {
   // ── POST /live/create ─────────────────────────────────────────────────────
   // Host gọi endpoint này để tạo room và nhận host token
   @Post('create')
+  @Throttle({ default: { limit: 3, ttl: 3600000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo stream mới (host)' })
   async createStream(

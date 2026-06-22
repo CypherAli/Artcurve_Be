@@ -180,11 +180,19 @@ export class GuildService {
       throw new ForbiddenException('Bạn phải là thành viên của guild để gửi tin nhắn');
     }
 
+    const sanitized = content?.replace(/<[^>]*>/g, '').trim();
+    if (!sanitized || sanitized.length === 0) {
+      throw new BadRequestException('Nội dung tin nhắn không được để trống');
+    }
+    if (sanitized.length > 2000) {
+      throw new BadRequestException('Nội dung tin nhắn không được quá 2000 ký tự');
+    }
+
     const msg = this.messageRepo.create({
       guild_id: guildId,
       user_id: userId,
       user_name: userName,
-      content,
+      content: sanitized,
     });
     return this.messageRepo.save(msg);
   }

@@ -1,8 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { InfraClickHouseService, OhlcvTimeframe, OhlcvCandle } from '../../shared/clickhouse/clickhouse-infra.service';
 import { TransactionRepository } from './repositories/transaction.repository';
 import { DataSource } from 'typeorm';
 import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
+import Redis from 'ioredis';
+import { INFRA_REDIS_CLIENT } from '../../shared/redis/redis-client.module';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TradesService  (src/modules/trades/)
@@ -48,6 +50,7 @@ export class TradesService {
     private readonly chService: InfraClickHouseService,
     private readonly txRepo: TransactionRepository,
     private readonly dataSource: DataSource,
+    @Inject(INFRA_REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ── OHLCV (Candlestick Chart) ──────────────────────────────────────────────
@@ -69,7 +72,21 @@ export class TradesService {
       `from=${from.toISOString()} to=${to.toISOString()}`,
     );
 
-    return this.chService.getOHLCVData(artworkId, timeframe, from, to, limit);
+    const cacheKey = `ohlcv:${artworkId}:${timeframe}:${from.getTime()}:${to.getTime()}:${limit}`;
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch { /* redis down — fall through to ClickHouse */ }
+
+    const data = await this.chService.getOHLCVData(artworkId, timeframe, from, to, limit);
+
+    try {
+      const isCurrentWindow = to.getTime() >= Date.now() - 60_000;
+      const ttl = isCurrentWindow ? 15 : 300;
+      await this.redis.set(cacheKey, JSON.stringify(data), 'EX', ttl);
+    } catch { /* ignore cache write failure */ }
+
+    return data;
   }
 
   // ── Trade History ──────────────────────────────────────────────────────────

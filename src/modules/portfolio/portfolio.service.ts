@@ -106,7 +106,7 @@ export class PortfolioService {
     const holdings: HoldingWithPnL[] = rows.map((row) => {
       const shares   = new Decimal(row.share_balance);
       const avgPrice = new Decimal(row.avg_buy_price);
-      const curPrice = new Decimal(row.current_price);
+      const curPrice = new Decimal(row.current_price ?? '0');
 
       const currentValue  = shares.mul(curPrice);                 // shares × current_price
       const costBasis     = shares.mul(avgPrice);                 // shares × avg_buy_price

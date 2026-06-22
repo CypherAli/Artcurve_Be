@@ -138,7 +138,10 @@ export class CurveEngineService {
   }
 
   getSellReturn(params: CurveParams, currentSupply: number, amount: number): QuoteResult {
-    const newSupply  = Math.max(0, currentSupply - amount);
+    if (amount > currentSupply) {
+      throw new Error(`Cannot sell ${amount} — only ${currentSupply} in supply`);
+    }
+    const newSupply  = currentSupply - amount;
     const ethAmount  = this.integral(params, newSupply, currentSupply);
     const avgPrice   = amount > 0 ? ethAmount / amount : 0;
     const newSpot    = this.spotPrice(params, newSupply);

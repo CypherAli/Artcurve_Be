@@ -58,6 +58,7 @@ import { GatewayModule }             from '../gateway/gateway.module';
     IndexerService,
     BlockchainEventConsumer,
     OrderMatchConsumer,
+    RabbitMQBlockchainConsumer,
   ],
 })
 export class BlockchainModule {}

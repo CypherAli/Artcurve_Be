@@ -49,8 +49,11 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // Non-blocking: RabbitMQ có thể không có trong dev
     this.connect();
+  }
+
+  isHealthy(): boolean {
+    return !!(this.channel);
   }
 
   private async connect(): Promise<void> {

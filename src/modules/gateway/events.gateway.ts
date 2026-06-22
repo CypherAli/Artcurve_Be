@@ -132,23 +132,34 @@ export class EventsGateway
     // RedisService dùng Set<callback> nên gọi nhiều lần từ nhiều gateway không tạo duplicate.
     // EventsGateway broadcast trade_updated đến /events namespace (JWT clients).
     // PriceGateway broadcast price_update đến /prices namespace (public).
-    this.redisService.subscribePriceUpdates((event) => {
-      this.broadcastTradeUpdated({
-        artwork_id:      event.artwork_id,
-        tx_hash:         event.tx_hash,
-        is_buy:          event.is_buy ?? true,
-        user_wallet:     event.user_wallet ?? '',
-        share_amount:    event.share_amount ?? '0',
-        eth_amount:      event.eth_amount ?? '0',
-        price_per_share: event.current_price,
-        block_number:    '0',
-        timestamp:       event.timestamp,
+    this.subscribeWithRetry();
+  }
+
+  private async subscribeWithRetry(attempt = 1): Promise<void> {
+    try {
+      await this.redisService.subscribePriceUpdates((event) => {
+        this.broadcastTradeUpdated({
+          artwork_id:      event.artwork_id,
+          tx_hash:         event.tx_hash,
+          is_buy:          event.is_buy ?? true,
+          user_wallet:     event.user_wallet ?? '',
+          share_amount:    event.share_amount ?? '0',
+          eth_amount:      event.eth_amount ?? '0',
+          price_per_share: event.current_price,
+          block_number:    '0',
+          timestamp:       event.timestamp,
+        });
       });
-    }).then(() => {
       this.logger.log('[EventsGateway] Subscribed to Redis artwork:price:updated');
-    }).catch((e) => {
-      this.logger.warn(`[EventsGateway] Redis subscribe skipped: ${(e as Error).message}`);
-    });
+    } catch (e) {
+      const delay = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+      this.logger.warn(`[EventsGateway] Redis subscribe failed (attempt ${attempt}), retry in ${delay}ms`);
+      if (attempt < 10) {
+        setTimeout(() => this.subscribeWithRetry(attempt + 1), delay);
+      } else {
+        this.logger.error('[EventsGateway] Redis subscribe gave up after 10 attempts');
+      }
+    }
   }
 
   onModuleDestroy(): void {

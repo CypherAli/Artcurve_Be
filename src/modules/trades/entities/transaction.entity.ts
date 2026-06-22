@@ -58,6 +58,7 @@ export class Transaction {
   gas_fee: string;
 
   // bigint cho block_number — số block có thể vượt quá INTEGER range
+  @Index('idx_tx_block_number')
   @Column({ type: 'bigint', nullable: true })
   block_number: string;
 

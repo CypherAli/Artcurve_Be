@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { ClickHouseClient } from '@clickhouse/client';
 import { INFRA_CLICKHOUSE_CLIENT } from './clickhouse.tokens';
+import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  InfraClickHouseService  (src/infrastructure/clickhouse/)
@@ -60,6 +61,7 @@ const OHLCV_TABLE: Record<OhlcvTimeframe, string> = {
 @Injectable()
 export class InfraClickHouseService {
   private readonly logger = new Logger(InfraClickHouseService.name);
+  private readonly breaker = new CircuitBreaker('ClickHouse', 5, 30_000);
 
   constructor(
     @Inject(INFRA_CLICKHOUSE_CLIENT)
@@ -119,35 +121,37 @@ export class InfraClickHouseService {
     //   countState()                            AS trade_count
     // FROM trades GROUP BY artwork_id, bucket;
 
-    const result = await this.ch.query({
-      query: `
-        SELECT
-          bucket,
-          toString(argMinMerge(open))        AS open,
-          toString(maxMerge(high))            AS high,
-          toString(minMerge(low))             AS low,
-          toString(argMaxMerge(close))        AS close,
-          toString(sumMerge(volume))          AS volume,
-          toString(countMerge(trade_count))   AS trade_count
-        FROM ${table}
-        WHERE artwork_id = {artwork_id: UUID}
-          AND bucket BETWEEN {from: DateTime} AND {to: DateTime}
-        GROUP BY artwork_id, bucket
-        ORDER BY bucket ASC
-        LIMIT {limit: UInt32}
-      `,
-      query_params: {
-        artwork_id: artworkId,
-        from:       from.toISOString().replace('T', ' ').substring(0, 19),
-        to:         to.toISOString().replace('T', ' ').substring(0, 19),
-        limit,
-      },
-      format: 'JSONEachRow',
-    });
+    return this.breaker.exec(async () => {
+      const result = await this.ch.query({
+        query: `
+          SELECT
+            bucket,
+            toString(argMinMerge(open))        AS open,
+            toString(maxMerge(high))            AS high,
+            toString(minMerge(low))             AS low,
+            toString(argMaxMerge(close))        AS close,
+            toString(sumMerge(volume))          AS volume,
+            toString(countMerge(trade_count))   AS trade_count
+          FROM ${table}
+          WHERE artwork_id = {artwork_id: UUID}
+            AND bucket BETWEEN {from: DateTime} AND {to: DateTime}
+          GROUP BY artwork_id, bucket
+          ORDER BY bucket ASC
+          LIMIT {limit: UInt32}
+        `,
+        query_params: {
+          artwork_id: artworkId,
+          from:       from.toISOString().replace('T', ' ').substring(0, 19),
+          to:         to.toISOString().replace('T', ' ').substring(0, 19),
+          limit,
+        },
+        format: 'JSONEachRow',
+      });
 
-    const rows = await result.json<OhlcvCandle>();
-    this.logger.debug(`[OHLCV] artworkId=${artworkId} tf=${timeframe} rows=${rows.length}`);
-    return rows;
+      const rows = await result.json<OhlcvCandle>();
+      this.logger.debug(`[OHLCV] artworkId=${artworkId} tf=${timeframe} rows=${rows.length}`);
+      return rows;
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -163,45 +167,44 @@ export class InfraClickHouseService {
     limit  = 50,
     offset = 0,
   ): Promise<TradeRow[]> {
-    const result = await this.ch.query({
-      query: `
-        SELECT
-          artwork_id, tx_hash, user_id, tx_type,
-          toString(share_amount)    AS share_amount,
-          toString(eth_amount)      AS eth_amount,
-          toString(price_per_share) AS price_per_share,
-          toString(gas_fee)         AS gas_fee,
-          block_number,
-          timestamp
-        FROM trades
-        WHERE artwork_id = {artwork_id: UUID}
-        ORDER BY timestamp DESC
-        LIMIT  {limit:  UInt32}
-        OFFSET {offset: UInt32}
-      `,
-      query_params: { artwork_id: artworkId, limit, offset },
-      format: 'JSONEachRow',
+    return this.breaker.exec(async () => {
+      const result = await this.ch.query({
+        query: `
+          SELECT
+            artwork_id, tx_hash, user_id, tx_type,
+            toString(share_amount)    AS share_amount,
+            toString(eth_amount)      AS eth_amount,
+            toString(price_per_share) AS price_per_share,
+            toString(gas_fee)         AS gas_fee,
+            block_number,
+            timestamp
+          FROM trades
+          WHERE artwork_id = {artwork_id: UUID}
+          ORDER BY timestamp DESC
+          LIMIT  {limit:  UInt32}
+          OFFSET {offset: UInt32}
+        `,
+        query_params: { artwork_id: artworkId, limit, offset },
+        format: 'JSONEachRow',
+      });
+      return result.json<TradeRow>();
     });
-
-    const rows = await result.json<TradeRow>();
-    return rows;
   }
 
-  /**
-   * Đếm tổng số trade rows của 1 artwork — dùng cho pagination wrapper.
-   */
   async countTradeHistory(artworkId: string): Promise<number> {
-    const result = await this.ch.query({
-      query: `
-        SELECT count() AS cnt
-        FROM trades
-        WHERE artwork_id = {artwork_id: UUID}
-      `,
-      query_params: { artwork_id: artworkId },
-      format: 'JSONEachRow',
+    return this.breaker.exec(async () => {
+      const result = await this.ch.query({
+        query: `
+          SELECT count() AS cnt
+          FROM trades
+          WHERE artwork_id = {artwork_id: UUID}
+        `,
+        query_params: { artwork_id: artworkId },
+        format: 'JSONEachRow',
+      });
+      const rows = await result.json<{ cnt: string }>();
+      return parseInt(rows[0]?.cnt ?? '0', 10);
     });
-    const rows = await result.json<{ cnt: string }>();
-    return parseInt(rows[0]?.cnt ?? '0', 10);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -245,44 +248,47 @@ export class InfraClickHouseService {
 
   /** Volume 24h của 1 artwork (fallback khi Redis cache miss) */
   async getVolume24h(artworkId: string): Promise<string> {
-    const from = new Date(Date.now() - 86_400_000);
-    const result = await this.ch.query({
-      query: `
-        SELECT toString(sumMerge(volume_eth)) AS volume
-        FROM volume_daily
-        WHERE artwork_id = {artwork_id: UUID}
-          AND day >= {from: Date}
-        GROUP BY artwork_id
-      `,
-      query_params: {
-        artwork_id: artworkId,
-        from:       from.toISOString().substring(0, 10),
-      },
-      format: 'JSONEachRow',
+    return this.breaker.exec(async () => {
+      const from = new Date(Date.now() - 86_400_000);
+      const result = await this.ch.query({
+        query: `
+          SELECT toString(sumMerge(volume_eth)) AS volume
+          FROM volume_daily
+          WHERE artwork_id = {artwork_id: UUID}
+            AND day >= {from: Date}
+          GROUP BY artwork_id
+        `,
+        query_params: {
+          artwork_id: artworkId,
+          from:       from.toISOString().substring(0, 10),
+        },
+        format: 'JSONEachRow',
+      });
+      const rows = await result.json<{ volume: string }>();
+      return rows[0]?.volume ?? '0';
     });
-    const rows = await result.json<{ volume: string }>();
-    return rows[0]?.volume ?? '0';
   }
 
-  /** Top N artworks theo volume 7 ngày — cho leaderboard trang chủ */
   async getTopByVolume(limit = 20): Promise<{ artwork_id: string; volume_eth: string; trade_count: string }[]> {
-    const from = new Date(Date.now() - 7 * 86_400_000);
-    const result = await this.ch.query({
-      query: `
-        SELECT
-          artwork_id,
-          toString(sumMerge(volume_eth))    AS volume_eth,
-          toString(countMerge(trade_count)) AS trade_count
-        FROM volume_daily
-        WHERE day >= {from: Date}
-        GROUP BY artwork_id
-        ORDER BY sumMerge(volume_eth) DESC
-        LIMIT {limit: UInt32}
-      `,
-      query_params: { from: from.toISOString().substring(0, 10), limit },
-      format: 'JSONEachRow',
+    return this.breaker.exec(async () => {
+      const from = new Date(Date.now() - 7 * 86_400_000);
+      const result = await this.ch.query({
+        query: `
+          SELECT
+            artwork_id,
+            toString(sumMerge(volume_eth))    AS volume_eth,
+            toString(countMerge(trade_count)) AS trade_count
+          FROM volume_daily
+          WHERE day >= {from: Date}
+          GROUP BY artwork_id
+          ORDER BY sumMerge(volume_eth) DESC
+          LIMIT {limit: UInt32}
+        `,
+        query_params: { from: from.toISOString().substring(0, 10), limit },
+        format: 'JSONEachRow',
+      });
+      return result.json();
     });
-    return result.json();
   }
 
   /** Health check */

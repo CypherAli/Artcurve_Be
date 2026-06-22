@@ -39,6 +39,7 @@ export class SocialController {
   // ── Follow ────────────────────────────────────────────────────────
 
   @Post('follow/:userId')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Follow một user' })
   follow(@Param('userId') userId: string, @CurrentUser() user: JwtPayload) {
@@ -46,6 +47,7 @@ export class SocialController {
   }
 
   @Delete('follow/:userId')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Unfollow một user' })
   unfollow(@Param('userId') userId: string, @CurrentUser() user: JwtPayload) {
@@ -69,6 +71,7 @@ export class SocialController {
   // ── Likes ─────────────────────────────────────────────────────────
 
   @Post('like/:artworkId')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Like một artwork' })
   like(@Param('artworkId') artworkId: string, @CurrentUser() user: JwtPayload) {
@@ -76,6 +79,7 @@ export class SocialController {
   }
 
   @Delete('like/:artworkId')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Unlike một artwork' })
   unlike(@Param('artworkId') artworkId: string, @CurrentUser() user: JwtPayload) {

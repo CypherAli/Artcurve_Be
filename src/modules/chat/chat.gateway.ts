@@ -7,18 +7,25 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { UseGuards, Logger } from '@nestjs/common';
+import { UseGuards, Logger, Inject } from '@nestjs/common';
+import sanitizeHtml = require('sanitize-html');
 import { Server, Socket } from 'socket.io';
 import { Web3AuthGuard } from '../../common/guards/web3-auth.guard';
 import { ChatService } from './chat.service';
+import { RedisService } from '../../shared/redis/redis.service';
+
+const CHAT_CORS_ORIGINS = [
+  process.env.FRONTEND_URL ?? 'https://artcurve-fe.vercel.app',
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:3000', 'http://localhost:3001']
+    : []),
+].filter(Boolean);
 
 @UseGuards(Web3AuthGuard)
 @WebSocketGateway({
   namespace: '/chat',
   cors: {
-    origin: (origin: string, cb: (err: Error | null, allow?: boolean) => void) => {
-      cb(null, true);
-    },
+    origin: CHAT_CORS_ORIGINS,
     credentials: true,
   },
   pingInterval: 25_000,
@@ -30,7 +37,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly chatSvc: ChatService) {}
+  constructor(
+    private readonly chatSvc: ChatService,
+    private readonly redisService: RedisService,
+  ) {}
 
   handleConnection(client: Socket) {
     const userId = (client as any).data?.user?.sub;
@@ -52,9 +62,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    // Rate limit: max 30 messages per minute per user
+    const rateLimitKey = `chat:rate:${userId}`;
+    const count = await this.redisService.increment(rateLimitKey);
+    if (count === 1) await this.redisService.expire(rateLimitKey, 60);
+    if (count > 30) {
+      client.emit('chat:error', { message: 'Too many messages. Please wait.' });
+      return;
+    }
+
+    const sanitizedContent = sanitizeHtml(data.content, { allowedTags: [], allowedAttributes: {} }).trim();
+
+    if (!sanitizedContent || sanitizedContent.length > 2000) {
+      client.emit('chat:error', { message: 'Invalid message content' });
+      return;
+    }
+
     try {
       const result = await this.chatSvc.sendMessage(userId, {
-        content: data.content,
+        content: sanitizedContent,
         session_id: data.session_id,
       });
 
@@ -69,7 +95,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     } catch (err: any) {
       this.logger.error(`chat:send error: ${err.message}`);
-      client.emit('chat:error', { message: err.message });
+      client.emit('chat:error', { message: 'Failed to process message' });
     }
   }
 
@@ -85,15 +111,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      const limit = Math.min(Math.max(data.limit ?? 50, 1), 100);
+      const offset = Math.max(data.offset ?? 0, 0);
       const messages = await this.chatSvc.getHistory(
         data.session_id,
         userId,
-        data.limit ?? 50,
-        data.offset ?? 0,
+        limit,
+        offset,
       );
       client.emit('chat:history_response', { session_id: data.session_id, messages });
     } catch (err: any) {
-      client.emit('chat:error', { message: err.message });
+      client.emit('chat:error', { message: 'Failed to load history' });
     }
   }
 }

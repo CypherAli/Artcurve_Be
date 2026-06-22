@@ -251,6 +251,10 @@ export class AuthService {
     });
     const profile = await profileRes.json() as any;
 
+    if (!profile.id || !profile.login) {
+      throw new UnauthorizedException('GitHub OAuth thất bại — profile không đầy đủ (thiếu id hoặc login)');
+    }
+
     // 3. Derive wallet address từ GitHub ID (deterministic, 42 chars)
     const walletAddress = `0x${Number(profile.id).toString(16).padStart(40, '0')}`;
 
@@ -432,14 +436,14 @@ export class AuthService {
       throw new UnauthorizedException('Telegram auth hash mismatch');
     }
 
-    // 2. Validate auth_date — chỉ chấp nhận trong vòng 5 phút (300s).
-    //    86400s (1 ngày) quá rộng — cho phép replay token cũ cả ngày.
+    // 2. Validate auth_date — chỉ chấp nhận trong vòng 30 giây.
+    //    300s quá rộng — cho phép replay token cũ 5 phút.
     const authDate   = parseInt(tgData.auth_date, 10);
     const nowSeconds = Math.floor(Date.now() / 1000);
     const diff       = nowSeconds - authDate;
-    if (isNaN(authDate) || diff < -10 || diff > 300) {
+    if (isNaN(authDate) || diff < -10 || diff > 30) {
       throw new UnauthorizedException(
-        'Telegram auth timestamp không hợp lệ hoặc đã hết hạn (tối đa 5 phút).',
+        'Telegram auth timestamp không hợp lệ hoặc đã hết hạn (tối đa 30 giây).',
       );
     }
 

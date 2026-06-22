@@ -1,12 +1,15 @@
-import { Injectable, ConflictException, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
+import { Injectable, ConflictException, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, DataSource, QueryFailedError } from 'typeorm'
+import sanitizeHtml = require('sanitize-html')
 import { Follower }         from './entities/follower.entity'
 import { SocialInteraction } from './entities/social-interaction.entity'
 import { NotificationsService } from '../notifications/notifications.service'
 
 @Injectable()
 export class SocialService {
+  private readonly logger = new Logger(SocialService.name)
+
   constructor(
     @InjectRepository(Follower)
     private readonly followerRepo: Repository<Follower>,
@@ -37,7 +40,7 @@ export class SocialService {
       title:       `${name} đã follow bạn`,
       description: 'Xem bộ sưu tập của họ',
       metadata:    { follower_id: followerId },
-    }).catch(() => {})
+    }).catch(err => this.logger.error(`Failed to notify follow: ${err?.message}`, err?.stack))
   }
 
   async unfollow(followerId: string, followingId: string): Promise<void> {
@@ -60,20 +63,13 @@ export class SocialService {
   // ── Likes ───────────────────────────────────────────────────────────
 
   async likeArtwork(userId: string, artworkId: string): Promise<void> {
-    const existing = await this.interactionRepo.findOne({
-      where: { user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' },
-    })
-    if (existing) throw new ConflictException('Đã like rồi.')
-    try {
-      await this.interactionRepo.save({ user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' })
-    } catch (err) {
-      // Race: 2 request like đồng thời → unique constraint chặn bản ghi thứ 2.
-      // Coi như đã like (idempotent) thay vì trả 500.
-      if (err instanceof QueryFailedError && (err as any).code === '23505') {
-        throw new ConflictException('Đã like rồi.')
-      }
-      throw err
-    }
+    const result = await this.interactionRepo
+      .createQueryBuilder()
+      .insert()
+      .values({ user_id: userId, artwork_id: artworkId, interaction_type: 'LIKE' })
+      .orIgnore()
+      .execute()
+    if (result.raw.length === 0) throw new ConflictException('Đã like rồi.')
   }
 
   async unlikeArtwork(userId: string, artworkId: string): Promise<void> {
@@ -112,11 +108,12 @@ export class SocialService {
       .getOne()
     if (duplicate) return duplicate
 
+    const clean = sanitizeHtml(content, { allowedTags: [], allowedAttributes: {} })
     const interaction = this.interactionRepo.create({
       user_id:          userId,
       artwork_id:       artworkId,
       interaction_type: 'COMMENT',
-      content,
+      content: clean,
       rating:           rating ?? null,
     })
     return this.interactionRepo.save(interaction)

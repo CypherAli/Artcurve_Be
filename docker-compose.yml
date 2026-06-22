@@ -78,7 +78,7 @@ services:
 
   # ── RabbitMQ 3 ────────────────────────────────────────────────────────────
   # Blockchain event queue + order book queue
-  # Management UI: http://localhost:15672  (guest / guest)
+  # Management UI: http://localhost:15672
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: artcurve_rabbitmq
@@ -89,8 +89,8 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-artcurve}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-artcurve_rmq_dev}
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 30s
@@ -111,8 +111,8 @@ services:
       REDIS_HOST:     redis
       REDIS_URL:      redis://redis:6379
       CLICKHOUSE_URL: http://clickhouse:8123
-      RABBITMQ_URL:   amqp://guest:guest@rabbitmq:5672
-      AMQP_URL:       amqp://guest:guest@rabbitmq:5672
+      RABBITMQ_URL:   amqp://${RABBITMQ_USER:-artcurve}:${RABBITMQ_PASS:-artcurve_rmq_dev}@rabbitmq:5672
+      AMQP_URL:       amqp://${RABBITMQ_USER:-artcurve}:${RABBITMQ_PASS:-artcurve_rmq_dev}@rabbitmq:5672
     ports:
       - '3001:3001'
     depends_on:
@@ -166,7 +166,7 @@ services:
     container_name: artcurve_order_matcher
     restart: unless-stopped
     environment:
-      AMQP_URL: amqp://guest:guest@rabbitmq:5672
+      AMQP_URL: amqp://${RABBITMQ_USER:-artcurve}:${RABBITMQ_PASS:-artcurve_rmq_dev}@rabbitmq:5672
     depends_on:
       rabbitmq:
         condition: service_healthy

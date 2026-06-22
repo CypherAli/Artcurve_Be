@@ -30,6 +30,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { ArtworksService } from './artworks.service';
+import { ArtworkStatus } from './entities/artwork.entity';
 import {
   CreateArtworkDto,
   UpdateArtworkStatusDto,
@@ -131,6 +132,7 @@ export class ArtworksController {
 
   @Get(':id/quote')
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Tính giá mua/bán token trước khi submit giao dịch',
@@ -147,6 +149,7 @@ export class ArtworksController {
   ) {
     if (amount <= 0) throw new BadRequestException('Amount must be positive');
     const artwork = await this.artworksService.getArtworkById(id);
+    if (artwork.status !== ArtworkStatus.ACTIVE) throw new BadRequestException('Can only quote ACTIVE artworks');
     const params  = this.curveEngine.paramsFromArtwork(artwork);
     const supply  = parseFloat(artwork.current_supply) || 0;
     return action === 'sell'
@@ -198,6 +201,7 @@ export class ArtworksController {
   // ─── POST /artworks — Tạo DRAFT ───────────────────────────────────────────
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 3600000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Tạo artwork mới (status = DRAFT)',
@@ -219,6 +223,7 @@ export class ArtworksController {
   // PHẢI đặt TRƯỚC /:id để không bị ParseUUIDPipe bắt "upload" làm UUID
 
   @Post('upload')
+  @Throttle({ default: { limit: 10, ttl: 3600000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Upload ảnh & pin ERC-721 metadata lên IPFS (Pinata)',
@@ -312,6 +317,7 @@ export class ArtworksController {
   // ─── GET /artworks/:id/history ────────────────────────────────────────────
 
   @Get(':id/history')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Lịch sử giao dịch của một artwork',

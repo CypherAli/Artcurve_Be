@@ -1,4 +1,4 @@
-import { Controller, Get }                from '@nestjs/common'
+import { Controller, Get, Optional }      from '@nestjs/common'
 import { ApiTags, ApiOperation }          from '@nestjs/swagger'
 import {
   HealthCheckService,
@@ -12,6 +12,7 @@ import { DataSource }                     from 'typeorm'
 import { Public }                         from '../../common/decorators'
 import { RedisService }                   from '../../shared/redis/redis.service'
 import { InfraClickHouseService }         from '../../shared/clickhouse/clickhouse-infra.service'
+import { RabbitMQBlockchainConsumer }     from '../blockchain/consumers/rabbitmq.consumer'
 
 @ApiTags('Health')
 @Controller('health')
@@ -23,6 +24,7 @@ export class HealthController {
     @InjectDataSource() private dataSource: DataSource,
     private readonly redisService: RedisService,
     private readonly chService:    InfraClickHouseService,
+    @Optional() private readonly rmqConsumer?: RabbitMQBlockchainConsumer,
   ) {}
 
   @Get()
@@ -44,6 +46,12 @@ export class HealthController {
       async (): Promise<HealthIndicatorResult> => {
         const ok = await this.chService.ping()
         return { clickhouse: { status: ok ? 'up' : 'down' } }
+      },
+
+      // RabbitMQ — blockchain event consumer
+      async (): Promise<HealthIndicatorResult> => {
+        const ok = this.rmqConsumer?.isHealthy() ?? false
+        return { rabbitmq: { status: ok ? 'up' : 'down' } }
       },
 
       // Memory guards — ngăn OOM crash trên container nhỏ

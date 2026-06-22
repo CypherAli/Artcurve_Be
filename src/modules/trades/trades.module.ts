@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TradesController } from './trades.controller';
 import { TradesService }    from './trades.service';
 import { InfraClickHouseModule } from '../../shared/clickhouse/clickhouse-client.module';
+import { InfraRedisModule } from '../../shared/redis/redis-client.module';
 import { Transaction } from './entities/transaction.entity';
 import { TransactionRepository } from './repositories/transaction.repository';
 
@@ -23,7 +24,7 @@ import { TransactionRepository } from './repositories/transaction.repository';
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Module({
-  imports:     [InfraClickHouseModule, TypeOrmModule.forFeature([Transaction])],
+  imports:     [InfraClickHouseModule, InfraRedisModule, TypeOrmModule.forFeature([Transaction])],
   controllers: [TradesController],
   providers:   [TradesService, TransactionRepository],
   exports:     [TradesService, TransactionRepository],

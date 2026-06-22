@@ -5,15 +5,51 @@ services:
     runtime: docker
     dockerfilePath: Dockerfile
     dockerContext: .
+    healthCheckPath: /api/v1/health/ping
+    numInstances: 1
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 75
+      targetCPUPercent: 70
+    startCommand: "npm run migration:run && node dist/main"
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://artcurve-fe.vercel.app
       - key: LIVEKIT_API_KEY
         sync: false
       - key: LIVEKIT_API_SECRET
         sync: false
       - key: LIVEKIT_URL
         value: wss://artcurve-3el8ft2f.livekit.cloud
+      - key: PINATA_API_KEY
+        sync: false
+      - key: PINATA_API_SECRET
+        sync: false
+      - key: PINATA_JWT
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: RABBITMQ_URL
+        sync: false
+      - key: CLICKHOUSE_URL
+        sync: false
 
   # ── Go WebSocket Hub ──────────────────────────────────────────────────────
   - type: web
@@ -21,6 +57,12 @@ services:
     runtime: docker
     dockerfilePath: services/ws-hub/Dockerfile
     dockerContext: services/ws-hub
+    healthCheckPath: /health
+    numInstances: 1
+    scaling:
+      minInstances: 1
+      maxInstances: 2
+      targetCPUPercent: 70
     envVars:
       - key: PORT
         value: "8080"
@@ -39,4 +81,8 @@ services:
     dockerContext: services/order-matcher
     envVars:
       - key: AMQP_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
         sync: false
