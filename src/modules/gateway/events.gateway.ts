@@ -215,6 +215,40 @@ export class EventsGateway
     this.server.to(`guild:${guildId}`).emit('guild:member:left', { guild_id: guildId, user_id: userId });
   }
 
+  // ── Live rooms ────────────────────────────────────────────────────────────
+
+  @SubscribeMessage('live:subscribe')
+  async handleLiveSubscribe(
+    @MessageBody()    data:   { room_name: string },
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    if (!data?.room_name) return;
+    await client.join(`live:${data.room_name}`);
+    this.logger.debug(`[WS] ${client.id} → joined live:${data.room_name}`);
+  }
+
+  @SubscribeMessage('live:unsubscribe')
+  async handleLiveUnsubscribe(
+    @MessageBody()    data:   { room_name: string },
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    if (!data?.room_name) return;
+    await client.leave(`live:${data.room_name}`);
+  }
+
+  broadcastLiveChat(roomName: string, message: {
+    id: string; room_name: string; user_id: string; user_name: string; content: string; created_at: Date;
+  }): void {
+    this.server.to(`live:${roomName}`).emit('live:chat:new', message);
+  }
+
+  broadcastLiveTip(roomName: string, tip: {
+    id: string; room_name: string; from_user_id: string; from_user_name: string;
+    amount_eth: string; message: string | null; created_at: Date;
+  }): void {
+    this.server.to(`live:${roomName}`).emit('live:tip:new', tip);
+  }
+
   // ── Client → Server ────────────────────────────────────────────────────────
 
   /**

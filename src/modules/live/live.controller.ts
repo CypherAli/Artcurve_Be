@@ -9,10 +9,12 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 
-import { LiveService }     from './live.service';
-import { CreateStreamDto } from './dto/create-stream.dto';
-import { CurrentUser }     from '../../common/decorators';
-import { Public }          from '../../common/decorators';
+import { LiveService }       from './live.service';
+import { CreateStreamDto }   from './dto/create-stream.dto';
+import { CreateLiveChatDto } from './dto/live-chat.dto';
+import { CreateLiveTipDto }  from './dto/live-tip.dto';
+import { CurrentUser }       from '../../common/decorators';
+import { Public }            from '../../common/decorators';
 import { JwtPayload }      from '../auth/auth.service';
 
 @ApiTags('live')
@@ -96,5 +98,64 @@ export class LiveController {
     @Req() req: RawBodyRequest<Request>,
   ) {
     return this.liveService.handleWebhook(body, signature, req.rawBody);
+  }
+
+  // ── Live Chat ─────────────────────────────────────────────────────────────
+
+  @Post(':roomName/chat')
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({ summary: 'Post chat message to live stream' })
+  async postChat(
+    @Param('roomName') roomName: string,
+    @Body() dto: CreateLiveChatDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const userName = user.wallet?.slice(0, 8) ?? 'Anon';
+    return this.liveService.postChatMessage(roomName, user.sub, userName, dto.content);
+  }
+
+  @Get(':roomName/chat')
+  @Public()
+  @ApiOperation({ summary: 'Get recent chat messages for stream' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getChat(
+    @Param('roomName') roomName: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.liveService.getChatMessages(roomName, limit ? +limit : 50);
+  }
+
+  // ── Tips ───────────────────────────────────────────────────────────────────
+
+  @Post(':roomName/tip')
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Send tip to stream host' })
+  async sendTip(
+    @Param('roomName') roomName: string,
+    @Body() dto: CreateLiveTipDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const userName = user.wallet?.slice(0, 8) ?? 'Anon';
+    return this.liveService.sendTip(roomName, user.sub, userName, dto.amount_eth, dto.message);
+  }
+
+  @Get(':roomName/tips')
+  @Public()
+  @ApiOperation({ summary: 'Get tips for a stream' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getTips(
+    @Param('roomName') roomName: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.liveService.getTips(roomName, limit ? +limit : 20);
+  }
+
+  @Get(':roomName/tips/total')
+  @Public()
+  @ApiOperation({ summary: 'Get total tips for a stream' })
+  async getTotalTips(@Param('roomName') roomName: string) {
+    return this.liveService.getTotalTips(roomName);
   }
 }

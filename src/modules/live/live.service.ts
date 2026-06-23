@@ -3,7 +3,10 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository }       from 'typeorm';
@@ -17,8 +20,11 @@ import {
 
 import { QueryFailedError } from 'typeorm';
 import { LiveStream }      from './entities/live-stream.entity';
+import { LiveChat }        from './entities/live-chat.entity';
+import { LiveTip }         from './entities/live-tip.entity';
 import { CreateStreamDto } from './dto/create-stream.dto';
 import { RedisService }    from '../../shared/redis/redis.service';
+import { EventsGateway }   from '../gateway/events.gateway';
 import { randomUUID }      from 'crypto';
 
 @Injectable()
@@ -28,8 +34,14 @@ export class LiveService {
   constructor(
     @InjectRepository(LiveStream)
     private readonly liveRepo: Repository<LiveStream>,
+    @InjectRepository(LiveChat)
+    private readonly chatRepo: Repository<LiveChat>,
+    @InjectRepository(LiveTip)
+    private readonly tipRepo: Repository<LiveTip>,
     private readonly config:   ConfigService,
     private readonly redisService: RedisService,
+    @Inject(forwardRef(() => EventsGateway))
+    private readonly eventsGateway: EventsGateway,
   ) {}
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -252,5 +264,78 @@ export class LiveService {
     }
 
     return { ok: true };
+  }
+
+  // ── Live Chat ─────────────────────────────────────────────────────────────
+
+  private async requireLiveStream(roomName: string): Promise<LiveStream> {
+    const stream = await this.liveRepo.findOne({ where: { room_name: roomName, is_live: true } });
+    if (!stream) throw new NotFoundException('Stream not found or has ended');
+    return stream;
+  }
+
+  async postChatMessage(roomName: string, userId: string, userName: string, content: string) {
+    await this.requireLiveStream(roomName);
+    const sanitized = content.replace(/<[^>]*>/g, '').trim();
+    if (!sanitized) throw new BadRequestException('Message cannot be empty');
+
+    const msg = this.chatRepo.create({
+      room_name: roomName,
+      user_id: userId,
+      user_name: userName,
+      content: sanitized.slice(0, 300),
+    });
+    const saved = await this.chatRepo.save(msg);
+    this.eventsGateway.broadcastLiveChat(roomName, saved);
+    return saved;
+  }
+
+  async getChatMessages(roomName: string, limit = 50) {
+    return this.chatRepo.find({
+      where: { room_name: roomName },
+      order: { created_at: 'DESC' },
+      take: Math.min(limit, 100),
+    });
+  }
+
+  // ── Tips ───────────────────────────────────────────────────────────────────
+
+  async sendTip(roomName: string, fromUserId: string, fromUserName: string, amountEth: string, message?: string) {
+    const stream = await this.requireLiveStream(roomName);
+
+    const amount = Number(amountEth);
+    if (isNaN(amount) || amount <= 0) {
+      throw new BadRequestException('Tip amount must be positive');
+    }
+
+    const tip = this.tipRepo.create({
+      room_name: roomName,
+      from_user_id: fromUserId,
+      from_user_name: fromUserName,
+      to_host_id: stream.host_id,
+      amount_eth: amountEth,
+      message: message?.replace(/<[^>]*>/g, '').trim().slice(0, 200) || null,
+    });
+    const saved = await this.tipRepo.save(tip);
+    this.eventsGateway.broadcastLiveTip(roomName, saved);
+    return saved;
+  }
+
+  async getTips(roomName: string, limit = 20) {
+    return this.tipRepo.find({
+      where: { room_name: roomName },
+      order: { created_at: 'DESC' },
+      take: Math.min(limit, 100),
+    });
+  }
+
+  async getTotalTips(roomName: string) {
+    const result = await this.tipRepo
+      .createQueryBuilder('t')
+      .select('COALESCE(SUM(CAST(t.amount_eth AS DECIMAL(38,18))), 0)', 'total')
+      .addSelect('COUNT(t.id)', 'count')
+      .where('t.room_name = :roomName', { roomName })
+      .getRawOne();
+    return { total_eth: Number(result?.total ?? 0), tip_count: Number(result?.count ?? 0) };
   }
 }

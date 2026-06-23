@@ -14,6 +14,8 @@ import { GuildService } from './guild.service';
 import { CreateGuildDto } from './dto/create-guild.dto';
 import { UpdateGuildDto } from './dto/update-guild.dto';
 import { CreateGuildMessageDto } from './dto/guild-message.dto';
+import { CreateAnnouncementDto } from './dto/create-announcement.dto';
+import { CreateInviteDto } from './dto/create-invite.dto';
 import { CurrentUser, Public } from '../../common/decorators';
 import { JwtPayload } from '../auth/auth.service';
 import { GuildRole } from './entities/guild-member.entity';
@@ -210,5 +212,117 @@ export class GuildController {
   @ApiOperation({ summary: 'Aggregated portfolio holdings of all guild members' })
   holdings(@Param('id', ParseUUIDPipe) id: string) {
     return this.guildService.getHoldings(id);
+  }
+
+  // ── Announcements ─────────────────────────────────────────────────────────
+
+  @Post(':id/announcements')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Create announcement (owner/moderator)' })
+  createAnnouncement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateAnnouncementDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.createAnnouncement(id, user.sub, user.wallet, dto.title, dto.content);
+  }
+
+  @Get(':id/announcements')
+  @Public()
+  @ApiOperation({ summary: 'Get guild announcements' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getAnnouncements(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.guildService.getAnnouncements(id, limit ? +limit : 10);
+  }
+
+  @Delete(':id/announcements/:announcementId')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Delete announcement' })
+  deleteAnnouncement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('announcementId', ParseUUIDPipe) announcementId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.deleteAnnouncement(id, announcementId, user.sub);
+  }
+
+  @Patch(':id/announcements/:announcementId/pin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Toggle pin announcement' })
+  togglePin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('announcementId', ParseUUIDPipe) announcementId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.togglePin(id, announcementId, user.sub);
+  }
+
+  // ── Invitations ───────────────────────────────────────────────────────────
+
+  @Post(':id/invites')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Create invite link (owner/moderator)' })
+  createInvite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateInviteDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.createInvite(id, user.sub, dto.max_uses, dto.expires_in_hours);
+  }
+
+  @Get(':id/invites')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'List guild invites (owner/moderator)' })
+  getInvites(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.getInvites(id, user.sub);
+  }
+
+  @Delete(':id/invites/:inviteId')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Delete invite' })
+  deleteInvite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('inviteId', ParseUUIDPipe) inviteId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.deleteInvite(id, inviteId, user.sub);
+  }
+
+  @Post('join-by-invite')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Join guild via invite code' })
+  joinByInvite(
+    @Body('code') code: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.useInvite(code, user.sub);
+  }
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
+  @Get(':id/analytics')
+  @Public()
+  @ApiOperation({ summary: 'Guild trading analytics' })
+  analytics(@Param('id', ParseUUIDPipe) id: string) {
+    return this.guildService.getAnalytics(id);
+  }
+
+  // ── Activity Feed ─────────────────────────────────────────────────────────
+
+  @Get(':id/activity')
+  @Public()
+  @ApiOperation({ summary: 'Recent trading activity of guild members' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  activity(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.guildService.getActivity(id, limit ? +limit : 20);
   }
 }

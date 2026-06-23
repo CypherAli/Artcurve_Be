@@ -11,6 +11,8 @@ import { Repository } from 'typeorm';
 import { Guild } from './entities/guild.entity';
 import { GuildMember, GuildRole } from './entities/guild-member.entity';
 import { GuildMessage } from './entities/guild-message.entity';
+import { GuildAnnouncement } from './entities/guild-announcement.entity';
+import { GuildInvite } from './entities/guild-invite.entity';
 import { PortfolioHolding } from '../portfolio/entities/portfolio-holding.entity';
 import { CreateGuildDto } from './dto/create-guild.dto';
 import { UpdateGuildDto } from './dto/update-guild.dto';
@@ -31,6 +33,10 @@ export class GuildService {
     private readonly messageRepo: Repository<GuildMessage>,
     @InjectRepository(PortfolioHolding)
     private readonly holdingRepo: Repository<PortfolioHolding>,
+    @InjectRepository(GuildAnnouncement)
+    private readonly announcementRepo: Repository<GuildAnnouncement>,
+    @InjectRepository(GuildInvite)
+    private readonly inviteRepo: Repository<GuildInvite>,
     @Inject(forwardRef(() => EventsGateway))
     private readonly eventsGateway: EventsGateway,
   ) {}
@@ -400,5 +406,228 @@ export class GuildService {
       .getRawMany();
 
     return holdings;
+  }
+
+  // ── Announcements ─────────────────────────────────────────────────────────
+
+  async createAnnouncement(guildId: string, userId: string, userName: string, title: string, content: string) {
+    await this.requireRole(guildId, userId, [GuildRole.OWNER, GuildRole.MODERATOR]);
+    const ann = this.announcementRepo.create({
+      guild_id: guildId,
+      user_id: userId,
+      user_name: userName,
+      title: title.replace(/<[^>]*>/g, '').trim(),
+      content: content.replace(/<[^>]*>/g, '').trim(),
+    });
+    return this.announcementRepo.save(ann);
+  }
+
+  async getAnnouncements(guildId: string, limit = 10) {
+    await this.requireGuild(guildId);
+    return this.announcementRepo.find({
+      where: { guild_id: guildId },
+      order: { is_pinned: 'DESC', created_at: 'DESC' },
+      take: Math.min(limit, 50),
+    });
+  }
+
+  async deleteAnnouncement(guildId: string, announcementId: string, userId: string) {
+    const ann = await this.announcementRepo.findOne({ where: { id: announcementId, guild_id: guildId } });
+    if (!ann) throw new NotFoundException('Announcement not found');
+    if (ann.user_id !== userId) {
+      await this.requireRole(guildId, userId, [GuildRole.OWNER]);
+    }
+    await this.announcementRepo.delete(announcementId);
+    return { deleted: true };
+  }
+
+  async togglePin(guildId: string, announcementId: string, userId: string) {
+    await this.requireRole(guildId, userId, [GuildRole.OWNER, GuildRole.MODERATOR]);
+    const ann = await this.announcementRepo.findOne({ where: { id: announcementId, guild_id: guildId } });
+    if (!ann) throw new NotFoundException('Announcement not found');
+    ann.is_pinned = !ann.is_pinned;
+    await this.announcementRepo.save(ann);
+    return { pinned: ann.is_pinned };
+  }
+
+  // ── Invitations ───────────────────────────────────────────────────────────
+
+  private generateCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
+  async createInvite(guildId: string, userId: string, maxUses?: number, expiresInHours?: number) {
+    await this.requireRole(guildId, userId, [GuildRole.OWNER, GuildRole.MODERATOR]);
+
+    const invite = this.inviteRepo.create({
+      guild_id: guildId,
+      code: this.generateCode(),
+      created_by: userId,
+      max_uses: maxUses ?? null,
+      expires_at: expiresInHours ? new Date(Date.now() + expiresInHours * 3600_000) : null,
+    });
+    return this.inviteRepo.save(invite);
+  }
+
+  async useInvite(code: string, userId: string) {
+    const invite = await this.inviteRepo.findOne({ where: { code }, relations: ['guild'] });
+    if (!invite) throw new NotFoundException('Invalid invite code');
+
+    if (invite.expires_at && new Date() > invite.expires_at) {
+      throw new BadRequestException('Invite has expired');
+    }
+    if (invite.max_uses && invite.uses >= invite.max_uses) {
+      throw new BadRequestException('Invite has reached max uses');
+    }
+
+    const guild = invite.guild;
+    const existing = await this.memberRepo.findOne({
+      where: { guild_id: guild.id, user_id: userId },
+    });
+    if (existing) throw new ConflictException('Already a member');
+
+    try {
+      await this.memberRepo.manager.transaction(async (em) => {
+        const current = await em.findOne(Guild, { where: { id: guild.id }, lock: { mode: 'pessimistic_write' } });
+        if (!current) throw new NotFoundException('Guild not found');
+        if (current.member_count >= current.max_members) {
+          throw new BadRequestException('Guild is full');
+        }
+        await em.insert(GuildMember, { guild_id: guild.id, user_id: userId, role: GuildRole.MEMBER });
+        await em.increment(Guild, { id: guild.id }, 'member_count', 1);
+        await em.increment(GuildInvite, { id: invite.id }, 'uses', 1);
+      });
+    } catch (err) {
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        throw new ConflictException('Already a member');
+      }
+      throw err;
+    }
+
+    this.eventsGateway.broadcastGuildMemberJoined(guild.id, userId);
+    return { joined: true, guild_id: guild.id, guild_name: guild.name };
+  }
+
+  async getInvites(guildId: string, userId: string) {
+    await this.requireRole(guildId, userId, [GuildRole.OWNER, GuildRole.MODERATOR]);
+    return this.inviteRepo.find({
+      where: { guild_id: guildId },
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  async deleteInvite(guildId: string, inviteId: string, userId: string) {
+    await this.requireRole(guildId, userId, [GuildRole.OWNER, GuildRole.MODERATOR]);
+    const invite = await this.inviteRepo.findOne({ where: { id: inviteId, guild_id: guildId } });
+    if (!invite) throw new NotFoundException('Invite not found');
+    await this.inviteRepo.delete(inviteId);
+    return { deleted: true };
+  }
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
+  async getAnalytics(guildId: string) {
+    await this.requireGuild(guildId);
+
+    const volumeStats = await this.guildRepo.manager.query(`
+      SELECT
+        COALESCE(SUM(CAST(t.eth_amount AS DECIMAL(38,18))), 0) AS total_volume_eth,
+        COALESCE(SUM(CASE WHEN t.timestamp > NOW() - INTERVAL '7 days' THEN CAST(t.eth_amount AS DECIMAL(38,18)) ELSE 0 END), 0) AS weekly_volume_eth,
+        COUNT(t.id) AS total_trades,
+        COUNT(CASE WHEN t.timestamp > NOW() - INTERVAL '7 days' THEN 1 END) AS weekly_trades
+      FROM guild_members gm
+      LEFT JOIN transactions t ON t.user_id = gm.user_id
+      WHERE gm.guild_id = $1
+    `, [guildId]);
+
+    const uniqueArtworks = await this.guildRepo.manager.query(`
+      SELECT COUNT(DISTINCT ph.artwork_id) AS count
+      FROM guild_members gm
+      INNER JOIN portfolio_holdings ph ON ph.user_id = gm.user_id
+      WHERE gm.guild_id = $1
+    `, [guildId]);
+
+    const topTraders = await this.guildRepo.manager.query(`
+      SELECT gm.user_id, u.username, u.wallet_address,
+        COALESCE(SUM(CAST(t.eth_amount AS DECIMAL(38,18))), 0) AS volume_eth,
+        COUNT(t.id) AS trade_count
+      FROM guild_members gm
+      LEFT JOIN users u ON u.id = gm.user_id
+      LEFT JOIN transactions t ON t.user_id = gm.user_id AND t.timestamp > NOW() - INTERVAL '7 days'
+      WHERE gm.guild_id = $1
+      GROUP BY gm.user_id, u.username, u.wallet_address
+      ORDER BY volume_eth DESC
+      LIMIT 5
+    `, [guildId]);
+
+    const topHoldings = await this.guildRepo.manager.query(`
+      SELECT ph.artwork_id, a.title, a.image_uri,
+        SUM(ph.share_balance) AS total_shares,
+        COUNT(DISTINCT ph.user_id) AS holder_count
+      FROM guild_members gm
+      INNER JOIN portfolio_holdings ph ON ph.user_id = gm.user_id
+      INNER JOIN artworks a ON a.id = ph.artwork_id
+      WHERE gm.guild_id = $1
+      GROUP BY ph.artwork_id, a.title, a.image_uri
+      ORDER BY total_shares DESC
+      LIMIT 5
+    `, [guildId]);
+
+    return {
+      total_volume_eth: Number(volumeStats[0]?.total_volume_eth ?? 0),
+      weekly_volume_eth: Number(volumeStats[0]?.weekly_volume_eth ?? 0),
+      total_trades: Number(volumeStats[0]?.total_trades ?? 0),
+      weekly_trades: Number(volumeStats[0]?.weekly_trades ?? 0),
+      unique_artworks: Number(uniqueArtworks[0]?.count ?? 0),
+      top_traders: topTraders.map((t: any) => ({
+        user_id: t.user_id,
+        username: t.username || t.wallet_address?.slice(0, 8),
+        volume_eth: Number(t.volume_eth),
+        trade_count: Number(t.trade_count),
+      })),
+      top_holdings: topHoldings.map((h: any) => ({
+        artwork_id: h.artwork_id,
+        title: h.title,
+        image_uri: h.image_uri,
+        total_shares: Number(h.total_shares),
+        holder_count: Number(h.holder_count),
+      })),
+    };
+  }
+
+  // ── Activity Feed ─────────────────────────────────────────────────────────
+
+  async getActivity(guildId: string, limit = 20) {
+    await this.requireGuild(guildId);
+    const take = Math.min(limit, 50);
+
+    const rows = await this.guildRepo.manager.query(`
+      SELECT t.tx_hash, t.user_id, u.username, u.wallet_address,
+        t.artwork_id, a.title AS artwork_title, a.image_uri,
+        t.is_buy, t.share_amount, t.eth_amount, t.timestamp
+      FROM guild_members gm
+      INNER JOIN transactions t ON t.user_id = gm.user_id
+      LEFT JOIN users u ON u.id = t.user_id
+      LEFT JOIN artworks a ON a.id = t.artwork_id
+      WHERE gm.guild_id = $1
+      ORDER BY t.timestamp DESC
+      LIMIT $2
+    `, [guildId, take]);
+
+    return rows.map((r: any) => ({
+      tx_hash: r.tx_hash,
+      user_id: r.user_id,
+      username: r.username || r.wallet_address?.slice(0, 8),
+      artwork_id: r.artwork_id,
+      artwork_title: r.artwork_title,
+      image_uri: r.image_uri,
+      is_buy: r.is_buy,
+      share_amount: r.share_amount,
+      eth_amount: r.eth_amount,
+      timestamp: r.timestamp,
+    }));
   }
 }
