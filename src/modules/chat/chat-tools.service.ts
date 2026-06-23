@@ -187,15 +187,15 @@ export class ChatToolsService {
 
   // ── guild ──────────────────────────────────────────────────────
   private async listGuilds(args: ToolArgs) {
-    const rows = await this.guild.listGuilds()
-    return { results: rows.slice(0, Math.min(Number(args.limit) || 8, 20)).map((g: any) => ({ name: g.name, focus: g.focus, members: g.member_count })) }
+    const result = await this.guild.listGuilds()
+    return { results: result.data.slice(0, Math.min(Number(args.limit) || 8, 20)).map((g: any) => ({ name: g.name, focus: g.focus, members: g.member_count })) }
   }
 
   private async guildDetails(args: ToolArgs) {
     const name = String(args.name ?? '').trim().toLowerCase()
     if (!name) return { error: 'missing_name' }
-    const all = await this.guild.listGuilds()
-    const g: any = all.find((x: any) => String(x.name).toLowerCase().includes(name))
+    const result = await this.guild.listGuilds()
+    const g: any = result.data.find((x: any) => String(x.name).toLowerCase().includes(name))
     if (!g) return { error: 'guild_not_found' }
     const holdings = await this.guild.getHoldings(g.id).catch(() => [])
     return {
