@@ -179,6 +179,42 @@ export class EventsGateway
     this.logger.debug(`WS disconnected: socketId=${client.id}`);
   }
 
+  // ── Guild rooms ────────────────────────────────────────────────────────────
+
+  @SubscribeMessage('guild:subscribe')
+  async handleGuildSubscribe(
+    @MessageBody()    data:   { guild_id: string },
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    if (!data?.guild_id) return;
+    await client.join(`guild:${data.guild_id}`);
+    this.logger.debug(`[WS] ${client.id} → joined guild:${data.guild_id}`);
+  }
+
+  @SubscribeMessage('guild:unsubscribe')
+  async handleGuildUnsubscribe(
+    @MessageBody()    data:   { guild_id: string },
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    if (!data?.guild_id) return;
+    await client.leave(`guild:${data.guild_id}`);
+    this.logger.debug(`[WS] ${client.id} → left guild:${data.guild_id}`);
+  }
+
+  broadcastGuildMessage(guildId: string, message: {
+    id: string; guild_id: string; user_id: string; user_name: string; content: string; created_at: Date;
+  }): void {
+    this.server.to(`guild:${guildId}`).emit('guild:message:new', message);
+  }
+
+  broadcastGuildMemberJoined(guildId: string, userId: string): void {
+    this.server.to(`guild:${guildId}`).emit('guild:member:joined', { guild_id: guildId, user_id: userId });
+  }
+
+  broadcastGuildMemberLeft(guildId: string, userId: string): void {
+    this.server.to(`guild:${guildId}`).emit('guild:member:left', { guild_id: guildId, user_id: userId });
+  }
+
   // ── Client → Server ────────────────────────────────────────────────────────
 
   /**
