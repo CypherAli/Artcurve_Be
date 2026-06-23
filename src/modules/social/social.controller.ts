@@ -1,6 +1,6 @@
 import {
   Controller, Post, Delete, Get,
-  Param, Body, Query,
+  Param, Body, Query, ParseUUIDPipe,
 } from '@nestjs/common'
 import {
   ApiTags, ApiOperation, ApiBearerAuth, ApiBody, ApiQuery,
@@ -42,7 +42,7 @@ export class SocialController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Follow một user' })
-  follow(@Param('userId') userId: string, @CurrentUser() user: JwtPayload) {
+  follow(@Param('userId', ParseUUIDPipe) userId: string, @CurrentUser() user: JwtPayload) {
     return this.socialService.follow(user.sub, userId)
   }
 
@@ -50,21 +50,21 @@ export class SocialController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Unfollow một user' })
-  unfollow(@Param('userId') userId: string, @CurrentUser() user: JwtPayload) {
+  unfollow(@Param('userId', ParseUUIDPipe) userId: string, @CurrentUser() user: JwtPayload) {
     return this.socialService.unfollow(user.sub, userId)
   }
 
   @Get('followers/:userId')
   @Public()
   @ApiOperation({ summary: 'Danh sách followers của một user' })
-  getFollowers(@Param('userId') userId: string) {
+  getFollowers(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.socialService.getFollowers(userId)
   }
 
   @Get('following/:userId')
   @Public()
   @ApiOperation({ summary: 'Danh sách user đang follow' })
-  getFollowing(@Param('userId') userId: string) {
+  getFollowing(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.socialService.getFollowing(userId)
   }
 
@@ -74,7 +74,7 @@ export class SocialController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Like một artwork' })
-  like(@Param('artworkId') artworkId: string, @CurrentUser() user: JwtPayload) {
+  like(@Param('artworkId', ParseUUIDPipe) artworkId: string, @CurrentUser() user: JwtPayload) {
     return this.socialService.likeArtwork(user.sub, artworkId)
   }
 
@@ -82,14 +82,14 @@ export class SocialController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Unlike một artwork' })
-  unlike(@Param('artworkId') artworkId: string, @CurrentUser() user: JwtPayload) {
+  unlike(@Param('artworkId', ParseUUIDPipe) artworkId: string, @CurrentUser() user: JwtPayload) {
     return this.socialService.unlikeArtwork(user.sub, artworkId)
   }
 
   @Get('likes/:artworkId/count')
   @Public()
   @ApiOperation({ summary: 'Số lượt like của artwork' })
-  likeCount(@Param('artworkId') artworkId: string) {
+  likeCount(@Param('artworkId', ParseUUIDPipe) artworkId: string) {
     return this.socialService.getLikeCount(artworkId)
   }
 
@@ -101,7 +101,7 @@ export class SocialController {
   @ApiOperation({ summary: 'Viết review + rating cho artwork (COMMENT)' })
   @ApiBody({ type: CreateCommentDto })
   createComment(
-    @Param('artworkId') artworkId: string,
+    @Param('artworkId', ParseUUIDPipe) artworkId: string,
     @Body() dto: CreateCommentDto,
     @CurrentUser() user: JwtPayload,
   ) {
@@ -114,7 +114,7 @@ export class SocialController {
   @ApiQuery({ name: 'page',  required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
   getComments(
-    @Param('artworkId') artworkId: string,
+    @Param('artworkId', ParseUUIDPipe) artworkId: string,
     @Query('page')  page  = 1,
     @Query('limit') limit = 20,
   ) {
@@ -125,7 +125,7 @@ export class SocialController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Xóa comment / review của chính mình' })
   deleteComment(
-    @Param('commentId') commentId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.socialService.deleteComment(user.sub, commentId)
@@ -134,7 +134,7 @@ export class SocialController {
   @Get('stats/:artworkId')
   @Public()
   @ApiOperation({ summary: 'Thống kê like + comment + avg_rating của artwork' })
-  getStats(@Param('artworkId') artworkId: string) {
+  getStats(@Param('artworkId', ParseUUIDPipe) artworkId: string) {
     return this.socialService.getArtworkStats(artworkId)
   }
 }

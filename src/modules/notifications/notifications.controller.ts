@@ -1,6 +1,6 @@
 import {
   Controller, Get, Patch, Delete,
-  Param, Query, HttpCode, HttpStatus,
+  Param, Query, HttpCode, HttpStatus, ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
@@ -45,7 +45,7 @@ export class NotificationsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Đánh dấu 1 thông báo đã đọc' })
   async markRead(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
     await this.svc.markRead(id, user.sub);
@@ -64,7 +64,7 @@ export class NotificationsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Xoá 1 thông báo' })
   async deleteOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
     await this.svc.deleteOne(id, user.sub);

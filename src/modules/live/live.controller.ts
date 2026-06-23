@@ -46,8 +46,20 @@ export class LiveController {
     return this.liveService.listLive();
   }
 
+  // ── POST /live/webhook (MUST be before :roomName routes) ──────────────────
+  @Post('webhook')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'LiveKit Cloud webhook — cập nhật viewer count (internal)' })
+  async handleLiveKitWebhook(
+    @Body() body: Record<string, unknown>,
+    @Headers('webhook-signature') signature: string,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    return this.liveService.handleWebhook(body, signature, req.rawBody);
+  }
+
   // ── GET /live/:roomName ───────────────────────────────────────────────────
-  // @Public() bắt buộc — LiveViewer.tsx fetch stream info không có JWT
   @Get(':roomName')
   @Public()
   @ApiOperation({ summary: 'Thông tin 1 stream (public)' })
@@ -56,7 +68,6 @@ export class LiveController {
   }
 
   // ── GET /live/:roomName/viewer-token ──────────────────────────────────────
-  // Viewer (authenticated hoặc anonymous) lấy token để xem stream
   @Get(':roomName/viewer-token')
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -73,7 +84,6 @@ export class LiveController {
   }
 
   // ── DELETE /live/:roomName ────────────────────────────────────────────────
-  // Host kết thúc stream của mình
   @Delete(':roomName')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Kết thúc stream (host only)' })
@@ -82,22 +92,6 @@ export class LiveController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.liveService.endStream(roomName, user.sub);
-  }
-
-  // ── POST /live/webhook ────────────────────────────────────────────────────
-  // LiveKit Cloud gọi endpoint này khi participant join/leave để cập nhật viewer_count.
-  // Phải đặt TRƯỚC /:roomName để không bị parse "webhook" làm roomName.
-  // Xác thực bằng webhook signature key để tránh spoof.
-  @Post('webhook')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'LiveKit Cloud webhook — cập nhật viewer count (internal)' })
-  async handleLiveKitWebhook(
-    @Body() body: Record<string, unknown>,
-    @Headers('webhook-signature') signature: string,
-    @Req() req: RawBodyRequest<Request>,
-  ) {
-    return this.liveService.handleWebhook(body, signature, req.rawBody);
   }
 
   // ── Live Chat ─────────────────────────────────────────────────────────────

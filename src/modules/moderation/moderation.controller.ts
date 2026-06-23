@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body } from '@nestjs/common'
+import { Controller, Post, Get, Param, Body, ParseUUIDPipe } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { ModerationService } from './moderation.service'
 import { Roles } from '../../common/decorators'
@@ -13,7 +13,7 @@ export class ModerationController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Submit artwork for AI moderation' })
   moderate(
-    @Param('artworkId') artworkId: string,
+    @Param('artworkId', ParseUUIDPipe) artworkId: string,
     @Body('image_url') imageUrl: string,
   ) {
     return this.moderationService.moderateArtwork(artworkId, imageUrl)
@@ -23,7 +23,7 @@ export class ModerationController {
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get moderation log for an artwork' })
-  getLogs(@Param('artworkId') artworkId: string) {
+  getLogs(@Param('artworkId', ParseUUIDPipe) artworkId: string) {
     return this.moderationService.getLogs(artworkId)
   }
 }

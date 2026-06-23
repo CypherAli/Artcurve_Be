@@ -8,6 +8,7 @@ import {
   DefaultValuePipe,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -131,7 +132,7 @@ export class TradesController {
   @ApiQuery({ name: 'limit',     type: Number,  required: false, description: 'Max candles (default 500)' })
   @ApiResponse({ status: 200, description: 'Mảng OhlcvCandle sorted ASC theo thời gian' })
   async getOhlcv(
-    @Param('artworkId')                    artworkId: string,
+    @Param('artworkId', ParseUUIDPipe)     artworkId: string,
     @Query('timeframe')                    timeframe: OhlcvTimeframe = '1m',
     @Query('from')                         fromStr?: string,
     @Query('to')                           toStr?:   string,
@@ -169,7 +170,7 @@ export class TradesController {
     },
   })
   async getHistory(
-    @Param('artworkId')                      artworkId: string,
+    @Param('artworkId', ParseUUIDPipe)       artworkId: string,
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
   ) {
@@ -186,7 +187,7 @@ export class TradesController {
     description: 'Query từ Materialized View volume_daily trong ClickHouse.',
   })
   @ApiResponse({ status: 200, schema: { example: { volume_eth: '1230000000000000000' } } })
-  async getVolume24h(@Param('artworkId') artworkId: string) {
+  async getVolume24h(@Param('artworkId', ParseUUIDPipe) artworkId: string) {
     const volume = await this.tradesService.getVolume24h(artworkId);
     return { volume_eth: volume };
   }
