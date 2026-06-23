@@ -57,13 +57,16 @@ export class LiveController {
   // Viewer (authenticated hoặc anonymous) lấy token để xem stream
   @Get(':roomName/viewer-token')
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Lấy viewer token cho stream' })
   @ApiQuery({ name: 'identity', required: false, description: 'wallet address hoặc anon id' })
   async getViewerToken(
     @Param('roomName') roomName: string,
     @Query('identity')  identity?: string,
   ) {
-    const viewerId = identity ?? `anon-${Date.now()}`;
+    const viewerId = (identity && identity.length <= 128)
+      ? identity.replace(/[^a-zA-Z0-9_\-\.]/g, '')
+      : `anon-${Date.now()}`;
     return this.liveService.getViewerToken(roomName, viewerId);
   }
 

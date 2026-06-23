@@ -15,6 +15,7 @@ import {
   type CreateOptions,
 } from 'livekit-server-sdk';
 
+import { QueryFailedError } from 'typeorm';
 import { LiveStream }      from './entities/live-stream.entity';
 import { CreateStreamDto } from './dto/create-stream.dto';
 import { RedisService }    from '../../shared/redis/redis.service';
@@ -110,7 +111,14 @@ export class LiveService {
       host_name:     hostName,
       artwork_ticker: dto.artwork_ticker ?? null,
     });
-    await this.liveRepo.save(stream);
+    try {
+      await this.liveRepo.save(stream);
+    } catch (err) {
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        throw new ConflictException('Duplicate stream room name');
+      }
+      throw err;
+    }
 
     const token = await this.buildToken(roomName, hostId, hostName, true);
 
@@ -156,8 +164,7 @@ export class LiveService {
     const stream = await this.liveRepo.findOne({
       where: { room_name: roomName, host_id: hostId, is_live: true },
     });
-    if (!stream) throw new NotFoundException('Stream không tồn tại.');
-    if (stream.host_id !== hostId) throw new ForbiddenException('Chỉ host mới được kết thúc stream.');
+    if (!stream) throw new NotFoundException('Stream không tồn tại hoặc bạn không phải host.');
 
     stream.is_live  = false;
     stream.ended_at = new Date();
@@ -220,6 +227,7 @@ export class LiveService {
     if (event === 'participant_joined' && participantId) {
       const setKey = `live:viewers:${roomName}`;
       await this.redisService.sadd(setKey, participantId);
+      await this.redisService.expire(setKey, 86400);
       const count = await this.redisService.scard(setKey);
       await this.liveRepo.update(
         { room_name: roomName, is_live: true },

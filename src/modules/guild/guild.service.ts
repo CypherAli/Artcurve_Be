@@ -34,28 +34,28 @@ export class GuildService {
   // ── Create guild ──────────────────────────────────────────────────────────
 
   async createGuild(userId: string, userName: string, dto: CreateGuildDto) {
-    const guild = this.guildRepo.create({
-      name: dto.name,
-      description: dto.description ?? null,
-      focus: dto.focus,
-      creator_id: userId,
-      member_count: 1,
-      level: 1,
-      max_members: dto.max_members ?? 30,
-      acceptance: dto.acceptance ?? 'auto',
-      avatar_color: randomColor(),
-    });
-    const saved = await this.guildRepo.save(guild);
+    return this.guildRepo.manager.transaction(async (em) => {
+      const guild = em.create(Guild, {
+        name: dto.name,
+        description: dto.description ?? null,
+        focus: dto.focus,
+        creator_id: userId,
+        member_count: 1,
+        level: 1,
+        max_members: dto.max_members ?? 30,
+        acceptance: dto.acceptance ?? 'auto',
+        avatar_color: randomColor(),
+      });
+      const saved = await em.save(guild);
 
-    // Add creator as owner
-    const member = this.memberRepo.create({
-      guild_id: saved.id,
-      user_id: userId,
-      role: GuildRole.OWNER,
-    });
-    await this.memberRepo.save(member);
+      await em.insert(GuildMember, {
+        guild_id: saved.id,
+        user_id: userId,
+        role: GuildRole.OWNER,
+      });
 
-    return saved;
+      return saved;
+    });
   }
 
   // ── List all guilds (kèm khối lượng giao dịch 7 ngày của thành viên) ───────
@@ -155,6 +155,7 @@ export class GuildService {
   // ── Members list ──────────────────────────────────────────────────────────
 
   async getMembers(guildId: string) {
+    await this.getGuild(guildId);
     return this.memberRepo.find({
       where: { guild_id: guildId },
       relations: ['user'],
@@ -184,8 +185,8 @@ export class GuildService {
     if (!sanitized || sanitized.length === 0) {
       throw new BadRequestException('Nội dung tin nhắn không được để trống');
     }
-    if (sanitized.length > 2000) {
-      throw new BadRequestException('Nội dung tin nhắn không được quá 2000 ký tự');
+    if (sanitized.length > 500) {
+      throw new BadRequestException('Nội dung tin nhắn không được quá 500 ký tự');
     }
 
     const msg = this.messageRepo.create({
@@ -200,6 +201,7 @@ export class GuildService {
   // ── Get messages ──────────────────────────────────────────────────────────
 
   async getMessages(guildId: string, limit = 50) {
+    await this.getGuild(guildId);
     return this.messageRepo.find({
       where: { guild_id: guildId },
       order: { created_at: 'DESC' },
@@ -210,7 +212,7 @@ export class GuildService {
   // ── Collective holdings ───────────────────────────────────────────────────
 
   async getHoldings(guildId: string) {
-    // Aggregate portfolio_holdings for all guild members
+    await this.getGuild(guildId);
     const holdings = await this.holdingRepo
       .createQueryBuilder('ph')
       .innerJoin('guild_members', 'gm', 'gm.user_id = ph.user_id')
