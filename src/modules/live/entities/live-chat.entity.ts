@@ -12,7 +12,7 @@ export class LiveChat {
   @Column({ type: 'varchar', length: 255 })
   room_name: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'uuid' })
   user_id: string;
 
   @Column({ type: 'varchar', length: 64 })

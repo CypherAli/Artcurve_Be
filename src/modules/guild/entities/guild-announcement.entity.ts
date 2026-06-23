@@ -26,7 +26,7 @@ export class GuildAnnouncement {
   @Column({ type: 'varchar', length: 1000 })
   content: string;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', default: false })
   is_pinned: boolean;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })

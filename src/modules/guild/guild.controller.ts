@@ -34,6 +34,18 @@ export class GuildController {
     return this.guildService.createGuild(user.sub, user.wallet, dto);
   }
 
+  // ── Join by invite (must be before :id routes) ────────────────────────────
+
+  @Post('join-by-invite')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Join guild via invite code' })
+  joinByInvite(
+    @Body('code') code: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.guildService.useInvite(code, user.sub);
+  }
+
   // ── List all guilds ───────────────────────────────────────────────────────
 
   @Get()
@@ -292,16 +304,6 @@ export class GuildController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.guildService.deleteInvite(id, inviteId, user.sub);
-  }
-
-  @Post('join-by-invite')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Join guild via invite code' })
-  joinByInvite(
-    @Body('code') code: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.guildService.useInvite(code, user.sub);
   }
 
   // ── Analytics ─────────────────────────────────────────────────────────────
