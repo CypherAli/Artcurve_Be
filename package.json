@@ -15,7 +15,7 @@
     "seed": "ts-node src/database/seeds/seed.ts",
     "test": "jest",
     "test:watch": "jest --watch",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@clickhouse/client": "^1.18.5",
@@ -75,6 +75,9 @@
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.10.2",
     "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "eslint": "^10.5.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.1",
