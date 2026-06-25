@@ -74,10 +74,9 @@ describe('CurveEngineService', () => {
     });
   });
 
-  it('getSellReturn không cho supply âm', () => {
+  it('getSellReturn throws khi amount > currentSupply', () => {
     const params = buildParams(CurveType.LINEAR);
-    const sell   = service.getSellReturn(params, 100, 500);
-    expect(parseFloat(sell.newSupply)).toBe(0);
+    expect(() => service.getSellReturn(params, 100, 500)).toThrow('Cannot sell 500');
   });
 
   it('deriveSlope trả 0 khi target_cap không vượt phần init_price (không slope âm)', () => {

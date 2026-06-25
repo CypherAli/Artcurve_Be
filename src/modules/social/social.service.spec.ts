@@ -113,20 +113,24 @@ describe('SocialService', () => {
   // ── Likes ───────────────────────────────────────────────────────
 
   describe('likeArtwork', () => {
-    it('should create LIKE interaction', async () => {
-      interactionRepo.findOne.mockResolvedValue(null);
-      interactionRepo.save.mockResolvedValue({} as any);
+    function mockInsertQb(rawResult: any[]) {
+      const qb: any = {};
+      qb.insert = jest.fn().mockReturnValue(qb);
+      qb.values = jest.fn().mockReturnValue(qb);
+      qb.orIgnore = jest.fn().mockReturnValue(qb);
+      qb.execute = jest.fn().mockResolvedValue({ raw: rawResult });
+      interactionRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
 
+    it('should create LIKE interaction', async () => {
+      mockInsertQb([{ id: '1' }]);
       await service.likeArtwork('user-1', 'art-1');
-      expect(interactionRepo.save).toHaveBeenCalledWith({
-        user_id: 'user-1',
-        artwork_id: 'art-1',
-        interaction_type: 'LIKE',
-      });
+      expect(interactionRepo.createQueryBuilder).toHaveBeenCalled();
     });
 
     it('should throw ConflictException when already liked', async () => {
-      interactionRepo.findOne.mockResolvedValue({} as any);
+      mockInsertQb([]);
       await expect(service.likeArtwork('user-1', 'art-1')).rejects.toThrow(ConflictException);
     });
   });

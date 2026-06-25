@@ -31,6 +31,7 @@ describe('TradesService', () => {
         { provide: InfraClickHouseService, useValue: chService },
         { provide: TransactionRepository, useValue: txRepo },
         { provide: DataSource, useValue: dataSource },
+        { provide: 'INFRA_REDIS_CLIENT', useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],
     }).compile();
 
