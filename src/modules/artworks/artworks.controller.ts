@@ -39,6 +39,7 @@ import {
 import { CurrentUser, Public } from '../auth/decorators';
 import { ClickHouseService, OhlcvInterval } from '../../shared/clickhouse/clickhouse.service';
 import { CurveEngineService } from '../../shared/curve-engine/curve-engine.service';
+import { OnchainQuoteService } from '../../shared/onchain-quote/onchain-quote.service';
 import { User } from '../users/entities/user.entity';
 
 @ApiTags('Artworks')
@@ -49,6 +50,7 @@ export class ArtworksController {
     private readonly artworksService:   ArtworksService,
     private readonly clickHouseService: ClickHouseService,
     private readonly curveEngine:       CurveEngineService,
+    private readonly onchainQuote:      OnchainQuoteService,
   ) {}
 
   // ─── GET /artworks — Marketplace listing ──────────────────────────────────
@@ -150,6 +152,19 @@ export class ArtworksController {
     if (amount <= 0) throw new BadRequestException('Amount must be positive');
     const artwork = await this.artworksService.getArtworkById(id);
     if (artwork.status !== ArtworkStatus.ACTIVE) throw new BadRequestException('Can only quote ACTIVE artworks');
+
+    // On-chain quote (matches actual execution price) when AMM is deployed
+    if (artwork.amm_address) {
+      try {
+        return action === 'sell'
+          ? await this.onchainQuote.getSellQuote(artwork.amm_address, amount)
+          : await this.onchainQuote.getBuyQuote(artwork.amm_address, amount);
+      } catch (err) {
+        // Fallback to off-chain engine if RPC fails
+      }
+    }
+
+    // Fallback: off-chain curve engine (for artworks not yet deployed)
     const params  = this.curveEngine.paramsFromArtwork(artwork);
     const supply  = parseFloat(artwork.current_supply) || 0;
     return action === 'sell'

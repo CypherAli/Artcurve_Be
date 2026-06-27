@@ -209,8 +209,12 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       eventName: 'ArtworkCreated',
       onLogs:    async (logs: any[]) => {
         for (const log of logs) {
-          await this.handleArtworkCreated(log);
-          await this.updateLastBlock(log.blockNumber);
+          try {
+            await this.handleArtworkCreated(log);
+            await this.updateLastBlock(log.blockNumber);
+          } catch (err) {
+            this.logger.error(`[ArtworkCreated] Failed at block ${log.blockNumber}, NOT advancing checkpoint: ${err.message}`);
+          }
         }
       },
       onError: (err: Error) => this.logger.error(`ArtworkCreated watcher: ${err.message}`),
@@ -225,8 +229,12 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       eventName: 'Trade',
       onLogs:    async (logs: any[]) => {
         for (const log of logs) {
-          await this.handleTrade(log);
-          await this.updateLastBlock(log.blockNumber);
+          try {
+            await this.handleTrade(log);
+            await this.updateLastBlock(log.blockNumber);
+          } catch (err) {
+            this.logger.error(`[Trade] Failed to process event at block ${log.blockNumber}, NOT advancing checkpoint: ${err.message}`);
+          }
         }
       },
       onError: (err: Error) => this.logger.error(`Trade watcher: ${err.message}`),
@@ -240,8 +248,12 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       eventName: 'GraduatedToDEX',
       onLogs:    async (logs: any[]) => {
         for (const log of logs) {
-          await this.handleGraduated(log);
-          await this.updateLastBlock(log.blockNumber);
+          try {
+            await this.handleGraduated(log);
+            await this.updateLastBlock(log.blockNumber);
+          } catch (err) {
+            this.logger.error(`[GraduatedToDEX] Failed at block ${log.blockNumber}, NOT advancing checkpoint: ${err.message}`);
+          }
         }
       },
       onError: (err: Error) => this.logger.error(`GraduatedToDEX watcher: ${err.message}`),
@@ -274,6 +286,7 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`[ArtworkCreated] id=${payload.artwork_id} tx=${payload.tx_hash}`);
     } catch (err) {
       this.logger.error(`handleArtworkCreated: ${err.message}`);
+      throw err;
     }
   }
 
@@ -302,6 +315,7 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (err) {
       this.logger.error(`handleTrade: ${err.message}`);
+      throw err;
     }
   }
 
@@ -324,6 +338,7 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`[GraduatedToDEX] id=${payload.artwork_id} liquidity=${payload.total_liquidity}`);
     } catch (err) {
       this.logger.error(`handleGraduated: ${err.message}`);
+      throw err;
     }
   }
 

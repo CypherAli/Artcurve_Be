@@ -12,6 +12,7 @@ import { envValidationSchema } from './config/env.validation';
 import { InfraRedisModule }         from './shared/redis/redis-client.module';
 import { InfraClickHouseModule }    from './shared/clickhouse/clickhouse-client.module';
 import { CurveEngineModule }        from './shared/curve-engine/curve-engine.module';
+import { OnchainQuoteModule }       from './shared/onchain-quote/onchain-quote.module';
 
 // ── Shared Services (@Global — business-level service wrappers) ──────────────
 import { DatabaseModule }           from './database/database.module';
@@ -95,6 +96,7 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     InfraRedisModule,          // INFRA_REDIS_CLIENT  — ioredis raw client
     InfraClickHouseModule,     // INFRA_CLICKHOUSE_CLIENT + ClickHouseSchemaService
     CurveEngineModule,         // @Global gRPC client → Rust Curve Engine :50051
+    OnchainQuoteModule,        // @Global on-chain quote via RPC (matches actual execution price)
 
     // ③ Persistence + Service Layer
     DatabaseModule,            // TypeORM + PostgreSQL

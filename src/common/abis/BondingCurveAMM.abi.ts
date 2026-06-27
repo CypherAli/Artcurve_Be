@@ -36,4 +36,32 @@ export const BONDING_CURVE_AMM_ABI = [
       { name: 'totalLiquidity', type: 'uint256', indexed: false },
     ],
   },
+  // ── View functions for on-chain price quotes ──
+  {
+    type: 'function',
+    name: 'getBuyPrice',
+    stateMutability: 'view',
+    inputs:  [{ name: 'amountOut', type: 'uint256' }],
+    outputs: [
+      { name: 'ethCost',   type: 'uint256' },
+      { name: 'totalCost', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'getSellPrice',
+    stateMutability: 'view',
+    inputs:  [{ name: 'amountIn', type: 'uint256' }],
+    outputs: [
+      { name: 'ethOut',    type: 'uint256' },
+      { name: 'netEthOut', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'getCurrentPrice',
+    stateMutability: 'view',
+    inputs:  [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ] as const;
