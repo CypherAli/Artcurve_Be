@@ -347,21 +347,25 @@ export class IndexerService implements OnModuleInit, OnModuleDestroy {
   // ══════════════════════════════════════════════════════════════════════════
 
   private buildClient(): any {
-    const rpcUrl  = this.config.get<string>('RPC_URL',    'https://mainnet.base.org');
-    const wsUrl   = this.config.get<string>('WS_RPC_URL', '');
-    const chainId = this.config.get<number>('CHAIN_ID',   8453);
-    const chain   = CHAIN_MAP[chainId] ?? base;
+    const rpcUrl      = this.config.get<string>('RPC_URL',          'https://mainnet.base.org');
+    const rpcFallback = this.config.get<string>('RPC_FALLBACK_URL', '');
+    const wsUrl       = this.config.get<string>('WS_RPC_URL',      '');
+    const chainId     = this.config.get<number>('CHAIN_ID',         8453);
+    const chain       = CHAIN_MAP[chainId] ?? base;
 
-    this.logger.log(`[Indexer] RPC: ${rpcUrl} (chainId=${chainId})`);
+    this.logger.log(`[Indexer] RPC: ${rpcUrl} (chainId=${chainId})${rpcFallback ? ` fallback: ${rpcFallback.slice(0, 30)}...` : ''}`);
 
-    // WebSocket transport: watchContractEvent uses eth_subscribe (no polling, no filter expiry)
-    // HTTP fallback: used for getLogs catch-up and if WS unavailable
+    const httpTransports = [
+      http(rpcUrl, { retryCount: 5, retryDelay: 2_000, timeout: 30_000 }),
+      ...(rpcFallback ? [http(rpcFallback, { retryCount: 3, retryDelay: 3_000, timeout: 30_000 })] : []),
+    ];
+
     const transport = wsUrl
       ? fallback([
           webSocket(wsUrl, { retryCount: 5, retryDelay: 2_000 }),
-          http(rpcUrl,     { retryCount: 5, retryDelay: 2_000, timeout: 30_000 }),
+          ...httpTransports,
         ])
-      : http(rpcUrl, { retryCount: 5, retryDelay: 2_000, timeout: 30_000 });
+      : fallback(httpTransports);
 
     if (wsUrl) this.logger.log(`[Indexer] WebSocket transport active: ${wsUrl.split('/v2/')[0]}/v2/***`);
 

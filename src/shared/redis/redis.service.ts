@@ -241,13 +241,19 @@ export class RedisService implements OnModuleDestroy {
     artworkId: string,
     data: ArtworkPriceCache,
   ): Promise<void> {
-    await this.redis.hset(REDIS_KEYS.artworkPrice(artworkId), {
+    const key = REDIS_KEYS.artworkPrice(artworkId);
+    await this.redis.hset(key, {
       current_price:  data.current_price,
       current_supply: data.current_supply,
-      volume_24h:     data.volume_24h,
       updated_at:     data.updated_at,
     });
-    // Khong set TTL — gia ton tai mai, chi bi ghi de boi trade moi
+    // Increment volume instead of overwriting — accumulates per trade
+    await this.redis.hincrbyfloat(key, 'volume_24h', parseFloat(data.volume_24h) || 0);
+  }
+
+  /** Reset 24h volume — call from a scheduled job every 24h */
+  async resetVolume24h(artworkId: string): Promise<void> {
+    await this.redis.hset(REDIS_KEYS.artworkPrice(artworkId), { volume_24h: '0' });
   }
 
   /** Doc gia tu cache (API dung cai nay) */

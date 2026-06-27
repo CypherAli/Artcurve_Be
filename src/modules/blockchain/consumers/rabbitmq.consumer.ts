@@ -104,8 +104,9 @@ export class RabbitMQBlockchainConsumer implements OnModuleInit {
   }
 
   private async startConsumers(): Promise<void> {
-    // prefetch(1): xử lý tuần tự để tránh race condition khi update balance
-    this.channel.prefetch(1);
+    // prefetch(5): process up to 5 messages concurrently.
+    // Safe because: tx_hash idempotency (ON CONFLICT DO NOTHING) + row-level locking on portfolio_holdings
+    this.channel.prefetch(5);
 
     // ── ArtworkCreated ──────────────────────────────────────────────────────
     // Payload: ArtworkCreatedPayload { amm_address, creator, artwork_id (onchain), ... }

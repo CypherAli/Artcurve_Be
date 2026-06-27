@@ -92,9 +92,15 @@ export class ClickHouseBufferService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`[CH Buffer] Flushed ${batch.length} trades`);
     } catch (err) {
       this.logger.error(`[CH Buffer] Flush failed: ${err.message}`, err.stack);
-      // Tra trades that bai lai buffer de thu lan sau
-      // (dat len dau buffer de giu thu tu thoi gian)
-      this.buffer = [...batch, ...this.buffer];
+      // Put failed trades back for retry (prepend to keep order)
+      // Cap buffer at 10000 to prevent OOM if ClickHouse is down long-term
+      const merged = [...batch, ...this.buffer];
+      if (merged.length > 10_000) {
+        this.logger.warn(`[CH Buffer] Dropping ${merged.length - 10_000} oldest trades (buffer cap reached)`);
+        this.buffer = merged.slice(-10_000);
+      } else {
+        this.buffer = merged;
+      }
     } finally {
       this.isFlushing = false;
 
