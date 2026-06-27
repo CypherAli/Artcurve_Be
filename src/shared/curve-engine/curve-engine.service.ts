@@ -155,6 +155,31 @@ export class CurveEngineService {
   }
 
   getPriceCurve(params: CurveParams, points = 50): PricePoint[] {
+    // Use constant product AMM formula matching on-chain BondingCurveAMM.sol
+    // On-chain: price = X * PRECISION / Y where X,Y are virtual pool reserves
+    // Initial state: X = initialVirtualETH (derived), Y = targetCap (totalSupply)
+    // k = X * Y = constant
+    // After selling `sold` shares: Y' = Y - sold, X' = k / Y' = X * Y / (Y - sold)
+    // price = X' / Y' = k / Y'^2
+    const T = params.totalSupply;
+    const initialX = params.initPrice * T; // virtual ETH = init_price * totalSupply
+    const k = initialX * T;
+    const n = Math.min(Math.max(points, 2), 500);
+    const result: PricePoint[] = [];
+    for (let i = 0; i <= n; i++) {
+      const sold = (i / n) * T;
+      const Y = T - sold;
+      const price = Y > 0 ? k / (Y * Y) : 0;
+      result.push({
+        supply: sold.toFixed(2),
+        price:  price.toFixed(8),
+      });
+    }
+    return result;
+  }
+
+  /** Original integral-based curve — kept for Studio preview (pre-deployment) */
+  getTheoreticalPriceCurve(params: CurveParams, points = 50): PricePoint[] {
     const n = Math.min(Math.max(points, 2), 500);
     const result: PricePoint[] = [];
     for (let i = 0; i <= n; i++) {
