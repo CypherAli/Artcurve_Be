@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { SecurityService } from '../security/security.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -61,6 +62,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: configService },
         { provide: RedisService, useValue: redisService },
         { provide: DataSource, useValue: dataSource },
+        { provide: SecurityService, useValue: { log: jest.fn(), trackFailedLogin: jest.fn().mockResolvedValue(1), clearFailedAttempts: jest.fn(), blockIp: jest.fn() } },
       ],
     }).compile();
 
