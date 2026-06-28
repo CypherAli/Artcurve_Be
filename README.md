@@ -26,6 +26,8 @@
 - [Database](#database)
 - [Microservices](#microservices)
 - [Deployment](#deployment)
+- [Security](#security)
+- [Backup Strategy](#backup-strategy)
 
 ---
 
@@ -295,6 +297,23 @@ Authorization: Bearer <access_token>
 DRAFT ──→ AI_MODERATING ──→ ACTIVE ──→ TARGET_REACHED ──→ GRADUATED
 ```
 
+### Artwork Type Filter
+
+Artworks can be filtered by type (creator self-declares when uploading):
+
+| Type | Description |
+|------|-------------|
+| `ORIGINAL` | Hand-made artwork (painting, digital art, etc.) |
+| `AI_GENERATED` | Fully AI-generated artwork |
+| `AI_ASSISTED` | Human-created with AI assistance |
+
+```bash
+# Filter by type
+GET /artworks?artwork_type=ORIGINAL
+GET /artworks?artwork_type=AI_GENERATED
+GET /artworks/search?artwork_type=ORIGINAL&q=sunset
+```
+
 ### Trades
 
 | Method | Endpoint | Auth | Description |
@@ -561,6 +580,76 @@ docker-compose up -d
 ```
 
 Services started: PostgreSQL, Redis, RabbitMQ, ClickHouse, NestJS API.
+
+---
+
+## Security
+
+### Authentication & Authorization
+- **SIWE** (EIP-4361) — Sign-In With Ethereum, nonce-based replay protection
+- **JWT** — 15min access + 30-day refresh, rotation, Redis blacklist for revoked tokens
+- **OAuth** — GitHub, Google, Twitter, Telegram with CSRF state tokens
+- **Role guards** — Global JWT guard with `@Public()` bypass decorator
+
+### Brute Force Protection
+- Failed login tracking per IP (Redis, 15-minute sliding window)
+- Auto-block IP after 5 failed attempts (30-minute ban)
+- `BruteForceGuard` applied to `/auth/verify`
+- All events logged to `security_events` table
+
+### Rate Limiting
+| Endpoint | Limit | Purpose |
+|----------|-------|---------|
+| `POST /auth/nonce` | 10/min | Anti-spam |
+| `POST /auth/verify` | 5/min + brute force guard | Anti-hack |
+| `POST /artworks` | 1/30min | Prevent artwork spam |
+| `POST /artworks/upload` | 1/30min | Prevent upload spam |
+| `GET /artworks/:id/quote` | 30/min | Anti-scraping |
+| Global default | 120/min | DDoS baseline |
+
+### Security Event Logging
+All auth events are recorded in `security_events` table:
+- `LOGIN_SUCCESS`, `LOGIN_FAILED`, `BRUTE_FORCE_BLOCKED`, `TOKEN_REVOKED`
+- Fields: event_type, wallet_address, ip_address, user_agent, severity, metadata
+
+### Security Headers
+- Helmet (CSP, CORP, COOP, X-Frame-Options, HSTS)
+- CORS strict whitelist (env `CORS_ORIGINS`)
+- Input validation: `ValidationPipe` with whitelist + forbidNonWhitelisted
+
+### Security Endpoints
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health/security` | Public | Recent 10 security events |
+| GET | `/health/backup` | Public | Backup status |
+| POST | `/health/backup/run` | JWT | Trigger manual backup |
+
+---
+
+## Backup Strategy
+
+### Automated Daily Backup
+- **Schedule**: Daily at 03:00 UTC (production only)
+- **Method**: `pg_dump` → gzip compression
+- **Retention**: Last 7 backups, older auto-deleted
+- **Storage**: `backups/` directory (gitignored)
+
+### Manual Backup
+```bash
+# Via API (requires JWT auth)
+curl -X POST https://artcurve-be.onrender.com/api/v1/health/backup/run \
+  -H "Authorization: Bearer <token>"
+
+# Via script
+./scripts/backup.sh                  # local DB
+DATABASE_URL="..." ./scripts/backup.sh --production  # production
+```
+
+### Check Status
+```bash
+curl https://artcurve-be.onrender.com/api/v1/health/backup
+# { "lastBackupTime": "2026-06-29T03:00:00Z", "lastBackupStatus": "success", "lastBackupSize": "12.5 MB" }
+```
 
 ---
 

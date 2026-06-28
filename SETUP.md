@@ -74,3 +74,11 @@ Contracts (Base Sepolia):
 4. Sau khi live → Vercel: set `NEXT_PUBLIC_WS_HUB_URL=wss://<service>.onrender.com`
 
 `REDIS_URL` chấp nhận cả `redis://`/`rediss://` (có password) lẫn `host:port`.
+
+## Environment variables mới (security + AI)
+
+| Env | Mặc định | Ghi chú |
+|-----|----------|---------|
+| `DB_SSL_REJECT_UNAUTHORIZED` | `true` | Set `false` nếu Render/Neon dùng self-signed cert |
+| `REDIS_SSL_REJECT_UNAUTHORIZED` | `true` | Set `false` cho Upstash hoặc Render Redis có TLS self-signed |
+| `GEMINI_API_KEY` | — | Google Gemini API key cho AI moderation (artwork content check) |
