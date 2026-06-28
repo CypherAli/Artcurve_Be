@@ -39,7 +39,9 @@ export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
   ...connectionConfig,
 
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
+  ssl: isProduction
+    ? { rejectUnauthorized: (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? 'true') === 'true' }
+    : false,
 
   entities: [
     User,

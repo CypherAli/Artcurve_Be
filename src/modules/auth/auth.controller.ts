@@ -5,13 +5,16 @@ import {
   Body,
   Headers,
   Query,
+  Req,
   Res,
   HttpCode,
   HttpStatus,
   BadRequestException,
   UnauthorizedException,
+  UseGuards,
   Logger,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Response } from 'express';
 import {
   ApiTags,
@@ -30,6 +33,7 @@ import {
   AuthResponseDto,
 } from './dto/auth.dto';
 import { Public, CurrentUser } from './decorators';
+import { BruteForceGuard }    from '../../common/guards/brute-force.guard';
 import { randomBytes }    from 'crypto';
 
 // Danh sách frontend URL được phép nhận OAuth redirect — chống Open Redirect
@@ -79,14 +83,20 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   // 5 lần verify / phút / IP — chống brute force signature
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @UseGuards(BruteForceGuard)
   @ApiOperation({ summary: 'Buoc 2: Verify chu ky SIWE va nhan JWT' })
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Chu ky khong hop le hoac nonce het han' })
-  async verify(@Body() dto: VerifySignatureDto): Promise<AuthResponseDto> {
+  async verify(
+    @Body() dto: VerifySignatureDto,
+    @Req() req: Request,
+  ): Promise<AuthResponseDto> {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
     return this.authService.verifySignatureAndIssueJwt(
       dto.wallet_address,
       dto.signature,
       dto.message,
+      ip,
     );
   }
 

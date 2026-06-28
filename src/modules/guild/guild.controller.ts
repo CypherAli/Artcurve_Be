@@ -8,7 +8,12 @@ import {
   Body,
   Query,
   ParseUUIDPipe,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { GuildService } from './guild.service';
 import { CreateGuildDto } from './dto/create-guild.dto';
@@ -23,7 +28,10 @@ import { GuildRole } from './entities/guild-member.entity';
 @ApiTags('guilds')
 @Controller('guilds')
 export class GuildController {
-  constructor(private readonly guildService: GuildService) {}
+  constructor(
+    private readonly guildService: GuildService,
+    private readonly configService: ConfigService,
+  ) {}
 
   // ── Create guild ──────────────────────────────────────────────────────────
 
@@ -326,5 +334,41 @@ export class GuildController {
     @Query('limit') limit?: number,
   ) {
     return this.guildService.getActivity(id, limit ? +limit : 20);
+  }
+
+  // ── AI character prompt generation (proxies Gemini API) ────────────────────
+
+  @Post('ai/character-prompt')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Generate character description via Gemini (server-side key)' })
+  async generateCharacterPrompt(
+    @Body('prompt') prompt: string,
+  ) {
+    if (!prompt || prompt.length > 500)
+      throw new BadRequestException('Prompt must be 1-500 chars');
+
+    const key = this.configService.get<string>('GEMINI_API_KEY');
+    if (!key) throw new BadRequestException('AI generation not configured');
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Generate a detailed character description as a 3D Pixar-style illustration prompt for an art guild member. The character should be a cute anthropomorphic cat in a fantasy guild setting. User's description: "${prompt}". Return ONLY the image generation prompt, nothing else. Make it vivid and detailed, under 300 chars.`,
+            }],
+          }],
+          generationConfig: { temperature: 0.9, maxOutputTokens: 400 },
+        }),
+      },
+    );
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    return { text };
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Optional }      from '@nestjs/common'
+import { Controller, Get, Post, Optional } from '@nestjs/common'
 import { ApiTags, ApiOperation }          from '@nestjs/swagger'
 import {
   HealthCheckService,
@@ -13,6 +13,8 @@ import { Public }                         from '../../common/decorators'
 import { RedisService }                   from '../../shared/redis/redis.service'
 import { InfraClickHouseService }         from '../../shared/clickhouse/clickhouse-infra.service'
 import { RabbitMQBlockchainConsumer }     from '../blockchain/consumers/rabbitmq.consumer'
+import { SecurityService }               from '../security/security.service'
+import { BackupService }                 from '../security/backup.service'
 
 @ApiTags('Health')
 @Controller('health')
@@ -24,6 +26,8 @@ export class HealthController {
     @InjectDataSource() private dataSource: DataSource,
     private readonly redisService: RedisService,
     private readonly chService:    InfraClickHouseService,
+    private readonly securityService: SecurityService,
+    private readonly backupService:   BackupService,
     @Optional() private readonly rmqConsumer?: RabbitMQBlockchainConsumer,
   ) {}
 
@@ -65,5 +69,34 @@ export class HealthController {
   @ApiOperation({ summary: 'Liveness probe — trả 200 OK ngay, không check dependencies' })
   ping() {
     return { status: 'ok', timestamp: new Date().toISOString(), service: 'artcurve-api' }
+  }
+
+  @Get('security')
+  @Public()
+  @ApiOperation({ summary: 'Recent security events (last 10)' })
+  async getSecurityStatus() {
+    const recentEvents = await this.securityService.getRecentEvents(10);
+    return {
+      recentEvents: recentEvents.map(e => ({
+        type:     e.event_type,
+        severity: e.severity,
+        ip:       e.ip_address,
+        wallet:   e.wallet_address,
+        time:     e.created_at,
+      })),
+    };
+  }
+
+  @Get('backup')
+  @Public()
+  @ApiOperation({ summary: 'Backup status — last run, size, next scheduled' })
+  async getBackupStatus() {
+    return this.backupService.getStatus();
+  }
+
+  @Post('backup/run')
+  @ApiOperation({ summary: 'Trigger manual backup (requires auth)' })
+  async runBackupNow() {
+    return this.backupService.runBackup();
   }
 }

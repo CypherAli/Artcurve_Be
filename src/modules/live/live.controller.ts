@@ -67,15 +67,14 @@ export class LiveController {
     return this.liveService.getStream(roomName);
   }
 
-  // ── GET /live/:roomName/viewer-token ──────────────────────────────────────
-  @Get(':roomName/viewer-token')
+  // ── POST /live/:roomName/viewer-token ─────────────────────────────────────
+  @Post(':roomName/viewer-token')
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Lấy viewer token cho stream' })
-  @ApiQuery({ name: 'identity', required: false, description: 'wallet address hoặc anon id' })
   async getViewerToken(
     @Param('roomName') roomName: string,
-    @Query('identity')  identity?: string,
+    @Body('identity')  identity?: string,
   ) {
     const viewerId = (identity && identity.length <= 128)
       ? identity.replace(/[^a-zA-Z0-9_\-\.]/g, '')

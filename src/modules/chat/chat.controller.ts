@@ -3,6 +3,7 @@ import {
   Body, Param, Query,
   HttpCode, HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import { CurrentUser } from '../auth/decorators';

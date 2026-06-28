@@ -17,6 +17,7 @@ import { EscalationTicket } from '../modules/chat/entities/escalation-ticket.ent
 import { Guild }           from '../modules/guild/entities/guild.entity';
 import { GuildMember }     from '../modules/guild/entities/guild-member.entity';
 import { GuildMessage }    from '../modules/guild/entities/guild-message.entity';
+import { SecurityEvent }  from '../modules/security/entities/security-event.entity';
 
 @Module({
   imports: [
@@ -41,7 +42,9 @@ import { GuildMessage }    from '../modules/guild/entities/guild-message.entity'
           type: 'postgres' as const,
           ...connectionConfig,
 
-          ssl: isProduction ? { rejectUnauthorized: false } : false,
+          ssl: isProduction
+            ? { rejectUnauthorized: config.get('DB_SSL_REJECT_UNAUTHORIZED', 'true') === 'true' }
+            : false,
 
           entities: [
             User,
@@ -60,6 +63,7 @@ import { GuildMessage }    from '../modules/guild/entities/guild-message.entity'
             Guild,
             GuildMember,
             GuildMessage,
+            SecurityEvent,
           ],
 
           migrations: [__dirname + '/migrations/*{.ts,.js}'],

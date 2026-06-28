@@ -18,6 +18,9 @@ build/
 
 # Logs
 logs/
+
+# Database backups
+backups/
 *.log
 
 # OS

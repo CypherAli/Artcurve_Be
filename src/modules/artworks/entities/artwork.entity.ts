@@ -15,6 +15,12 @@ import { PortfolioHolding } from '../../portfolio/entities/portfolio-holding.ent
 import { SocialInteraction } from '../../social/entities/social-interaction.entity';
 import { ModerationLog } from './moderation-log.entity';
 
+export enum ArtworkType {
+  ORIGINAL     = 'ORIGINAL',
+  AI_GENERATED = 'AI_GENERATED',
+  AI_ASSISTED  = 'AI_ASSISTED',
+}
+
 // State machine lifecycle: DRAFT → AI_MODERATING → ACTIVE → TARGET_REACHED → GRADUATED
 export enum ArtworkStatus {
   DRAFT           = 'DRAFT',
@@ -78,6 +84,14 @@ export class Artwork {
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @Index('idx_artworks_artwork_type')
+  @Column({
+    type: 'enum',
+    enum: ArtworkType,
+    default: ArtworkType.ORIGINAL,
+  })
+  artwork_type: ArtworkType;
 
   /**
    * Trực tiếp lưu image URI (ipfs://Qm... hoặc https://...).

@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArtworkStatus, ARTWORK_CATEGORIES, CurveType } from '../entities/artwork.entity';
+import { ArtworkStatus, ArtworkType, ARTWORK_CATEGORIES, CurveType } from '../entities/artwork.entity';
 
 // ── Allowed status transitions ────────────────────────────────────────────────
 const ALLOWED_STATUS_TRANSITIONS = [
@@ -107,6 +107,17 @@ export class CreateArtworkDto {
     message: `category phải là một trong: ${ARTWORK_CATEGORIES.join(', ')}`,
   })
   category?: string;
+
+  @ApiPropertyOptional({
+    description: 'Loại tác phẩm: ORIGINAL (thủ công), AI_GENERATED (AI tạo), AI_ASSISTED (AI hỗ trợ)',
+    enum: ArtworkType,
+    default: ArtworkType.ORIGINAL,
+  })
+  @IsOptional()
+  @IsIn(Object.values(ArtworkType), {
+    message: `artwork_type phải là: ${Object.values(ArtworkType).join(', ')}`,
+  })
+  artwork_type?: ArtworkType;
 
   /**
    * Phần trăm royalty cho creator (0-10%).
@@ -207,6 +218,13 @@ export class SearchArtworksDto {
   @IsOptional()
   @IsIn(Object.values(CurveType))
   curve_type?: CurveType;
+
+  @ApiPropertyOptional({ description: 'Lọc theo loại tác phẩm', enum: ArtworkType })
+  @IsOptional()
+  @IsIn(Object.values(ArtworkType), {
+    message: `artwork_type phải là: ${Object.values(ArtworkType).join(', ')}`,
+  })
+  artwork_type?: ArtworkType;
 
   @ApiPropertyOptional({
     description: 'Sắp xếp',

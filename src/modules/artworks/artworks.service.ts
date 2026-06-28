@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { Artwork, ArtworkStatus, CurveType } from './entities/artwork.entity';
+import { Artwork, ArtworkStatus, ArtworkType, CurveType } from './entities/artwork.entity';
 import { Transaction } from '../trades/entities/transaction.entity';
 import {
   CreateArtworkDto,
@@ -49,6 +49,7 @@ const MARKETPLACE_COLS = [
   'artwork.target_cap',
   'artwork.view_count',
   'artwork.status',
+  'artwork.artwork_type',
   'artwork.created_at',
   'creator.id',
   'creator.wallet_address',
@@ -118,6 +119,7 @@ export class ArtworksService {
       target_cap:        dto.target_cap,
       ticker,
       category:          dto.category       ?? null,
+      artwork_type:      dto.artwork_type   ?? ArtworkType.ORIGINAL,
       royalty_pct:       dto.royalty_pct    ?? '5.00',
       curve_type:        dto.curve_type     ?? CurveType.QUADRATIC,
       init_price:        dto.init_price     ?? '0.00100000',
@@ -206,8 +208,8 @@ export class ArtworksService {
     sortBy: 'price' | 'created_at' | 'view_count' | 'trending' = 'created_at',
     page  = 1,
     limit = 20,
+    artworkType?: ArtworkType,
   ): Promise<{ data: Artwork[]; total: number; page: number }> {
-    // trending: lấy top N artwork_id từ Redis leaderboard rồi fetch + sort theo thứ tự đó
     if (sortBy === 'trending') {
       return this.getMarketplaceTrending(page, limit);
     }
@@ -218,19 +220,23 @@ export class ArtworksService {
       view_count: 'artwork.view_count',
     }[sortBy] ?? 'artwork.created_at';
 
-    // Versioned list cache: key nhúng version → bump version (khi tạo/đổi status
-    // artwork) vô hiệu hoá toàn bộ list cũ tức thì. Giá có thể trễ tối đa CACHE_LIST
-    // giây nhưng FE đã nhận giá realtime qua WebSocket nên chấp nhận được.
+    const typeKey = artworkType ?? 'all';
     const ver      = await this.redisService.cacheGetVersion(CACHE_NS_MARKETPLACE);
-    const cacheKey = REDIS_KEYS.cacheList(CACHE_NS_MARKETPLACE, ver, `${sortBy}:${page}:${limit}`);
+    const cacheKey = REDIS_KEYS.cacheList(CACHE_NS_MARKETPLACE, ver, `${sortBy}:${typeKey}:${page}:${limit}`);
     const cached   = await this.redisService.cacheGetJson<{ data: Artwork[]; total: number; page: number }>(cacheKey);
     if (cached) return cached;
 
-    const [data, total] = await this.artworkRepo
+    const qb = this.artworkRepo
       .createQueryBuilder('artwork')
       .leftJoin('artwork.creator', 'creator')
       .select([...MARKETPLACE_COLS])
-      .where('artwork.status = :status', { status: ArtworkStatus.ACTIVE })
+      .where('artwork.status = :status', { status: ArtworkStatus.ACTIVE });
+
+    if (artworkType) {
+      qb.andWhere('artwork.artwork_type = :artworkType', { artworkType });
+    }
+
+    const [data, total] = await qb
       .orderBy(sortCol, 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
@@ -248,6 +254,7 @@ export class ArtworksService {
   async getMarketplaceCursor(
     limit = 20,
     cursor?: string,
+    artworkType?: ArtworkType,
   ): Promise<CursorPage<Artwork>> {
     const decoded = decodeCursor(cursor);
 
@@ -256,6 +263,10 @@ export class ArtworksService {
       .leftJoin('artwork.creator', 'creator')
       .select([...MARKETPLACE_COLS])
       .where('artwork.status = :status', { status: ArtworkStatus.ACTIVE });
+
+    if (artworkType) {
+      qb.andWhere('artwork.artwork_type = :artworkType', { artworkType });
+    }
 
     if (decoded) {
       qb.andWhere(
@@ -364,7 +375,8 @@ export class ArtworksService {
     }
 
     if (dto.category)   qb.andWhere('artwork.category = :cat',   { cat: dto.category });
-    if (dto.curve_type) qb.andWhere('artwork.curve_type = :ct',  { ct:  dto.curve_type });
+    if (dto.curve_type)   qb.andWhere('artwork.curve_type = :ct',  { ct:  dto.curve_type });
+    if (dto.artwork_type) qb.andWhere('artwork.artwork_type = :at', { at:  dto.artwork_type });
 
     const [data, total] = await qb
       .orderBy(sortCol, 'DESC')

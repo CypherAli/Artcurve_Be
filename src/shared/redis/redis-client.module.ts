@@ -41,7 +41,7 @@ export const INFRA_REDIS_CLIENT = 'INFRA_REDIS_CLIENT';
               retryStrategy: (times: number) => Math.min(times * 500, 10_000),
               connectionName: 'artcurve-infra',
               lazyConnect: true,
-              tls: url.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+              tls: url.startsWith('rediss://') ? { rejectUnauthorized: config.get('REDIS_SSL_REJECT_UNAUTHORIZED', 'true') === 'true' } : undefined,
             })
           : new Redis({
               host:         config.get('REDIS_HOST',     'localhost'),

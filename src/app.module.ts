@@ -53,6 +53,9 @@ import { GuildModule }              from './modules/guild/guild.module';
 // ── AI Chat ───────────────────────────────────────────────────────────────────
 import { ChatModule }               from './modules/chat/chat.module';
 
+// ── Security ──────────────────────────────────────────────────────────────────
+import { SecurityModule }           from './modules/security/security.module';
+
 // ── Blockchain Pipeline (@Global — merged indexer + consumer) ─────────────────
 import { BlockchainModule }         from './modules/blockchain/blockchain.module';
 
@@ -103,7 +106,10 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     RedisModule,               // RedisService — pub/sub, cache, nonce, JWT blacklist
     ClickHouseModule,          // ClickHouseService + ClickHouseBufferService
 
-    // ④ Auth
+    // ④ Security (@Global — audit log, brute force, backup)
+    SecurityModule,
+
+    // ⑤ Auth
     AuthModule,
 
     // ⑤ Feature Modules

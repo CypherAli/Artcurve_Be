@@ -30,7 +30,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { ArtworksService } from './artworks.service';
-import { ArtworkStatus } from './entities/artwork.entity';
+import { ArtworkStatus, ArtworkType } from './entities/artwork.entity';
 import {
   CreateArtworkDto,
   UpdateArtworkStatusDto,
@@ -66,6 +66,7 @@ export class ArtworksController {
   })
   @ApiQuery({ name: 'sortBy', enum: ['price', 'created_at', 'view_count', 'trending'], required: false })
   @ApiQuery({ name: 'cursor', type: String, required: false, description: 'Keyset cursor (chỉ cho sortBy=created_at). Có cursor → infinite scroll, bỏ qua page.' })
+  @ApiQuery({ name: 'artwork_type', enum: ArtworkType, required: false, description: 'Lọc: ORIGINAL, AI_GENERATED, AI_ASSISTED' })
   @ApiQuery({ name: 'page',   type: Number, required: false, example: 1 })
   @ApiQuery({ name: 'limit',  type: Number, required: false, example: 20 })
   @ApiResponse({ status: 200, description: 'Cursor mode (created_at): { data, next_cursor, has_more }. Legacy: { data, total, page }.' })
@@ -74,13 +75,15 @@ export class ArtworksController {
     @Query('page',  new DefaultValuePipe(1),  ParseIntPipe) page:  number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('cursor') cursor?: string,
+    @Query('artwork_type') artworkType?: ArtworkType,
   ) {
+    const validType = artworkType && Object.values(ArtworkType).includes(artworkType)
+      ? artworkType : undefined;
     const cappedLimit = Math.min(limit, 100);
-    // Keyset infinite-scroll cho dòng "mới nhất" (sortBy mặc định created_at)
     if (cursor !== undefined && sortBy === 'created_at') {
-      return this.artworksService.getMarketplaceCursor(cappedLimit, cursor || undefined);
+      return this.artworksService.getMarketplaceCursor(cappedLimit, cursor || undefined, validType);
     }
-    return this.artworksService.getMarketplace(sortBy, page, cappedLimit);
+    return this.artworksService.getMarketplace(sortBy, page, cappedLimit, validType);
   }
 
   // ─── GET /artworks/search — Full-text + filter ────────────────────────────
@@ -216,7 +219,7 @@ export class ArtworksController {
   // ─── POST /artworks — Tạo DRAFT ───────────────────────────────────────────
 
   @Post()
-  @Throttle({ default: { limit: 20, ttl: 3600000 } })
+  @Throttle({ default: { limit: 1, ttl: 1800000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Tạo artwork mới (status = DRAFT)',
@@ -238,7 +241,7 @@ export class ArtworksController {
   // PHẢI đặt TRƯỚC /:id để không bị ParseUUIDPipe bắt "upload" làm UUID
 
   @Post('upload')
-  @Throttle({ default: { limit: 10, ttl: 3600000 } })
+  @Throttle({ default: { limit: 1, ttl: 1800000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Upload ảnh & pin ERC-721 metadata lên IPFS (Pinata)',

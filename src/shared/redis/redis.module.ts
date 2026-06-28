@@ -14,7 +14,7 @@ function makeRedisClient(config: ConfigService, name: string): Redis {
         enableOfflineQueue: true,
         lazyConnect:        true,
         retryStrategy:      (times) => Math.min(times * 1000, 15_000),
-        tls: url.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+        tls: url.startsWith('rediss://') ? { rejectUnauthorized: config.get('REDIS_SSL_REJECT_UNAUTHORIZED', 'true') === 'true' } : undefined,
       })
     // Fallback: separate host/port/password (local dev)
     : new Redis({

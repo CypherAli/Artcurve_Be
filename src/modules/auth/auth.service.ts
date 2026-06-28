@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { RedisService } from '../../shared/redis/redis.service';
+import { SecurityService } from '../security/security.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AuthService — SIWE (Sign-In with Ethereum, EIP-4361)
@@ -56,10 +57,11 @@ export class AuthService {
   private readonly uri: string;
 
   constructor(
-    private readonly dataSource:   DataSource,
-    private readonly jwtService:   JwtService,
-    private readonly config:       ConfigService,
-    private readonly redisService: RedisService,
+    private readonly dataSource:      DataSource,
+    private readonly jwtService:      JwtService,
+    private readonly config:          ConfigService,
+    private readonly redisService:    RedisService,
+    private readonly securityService: SecurityService,
   ) {
     this.domain = config.get('APP_DOMAIN', 'artcurve.io');
     this.uri    = config.get('APP_URI',    'https://artcurve.io');
@@ -142,6 +144,7 @@ export class AuthService {
     walletAddress: string,
     signature: string,
     rawMessage: string,
+    ip: string = 'unknown',
   ): Promise<{
     access_token:  string;
     refresh_token: string;
@@ -160,6 +163,15 @@ export class AuthService {
     //    GETDEL: nếu 2 request đến cùng lúc, chỉ 1 cái lấy được nonce; cái còn lại thấy null.
     const storedNonce = await this.redisService.consumeNonce(normalized);
     if (!storedNonce) {
+      const failCount = await this.securityService.trackFailedLogin(ip);
+      if (failCount >= 5) await this.securityService.blockIp(ip, 1800);
+      await this.securityService.log({
+        event_type: 'LOGIN_FAILED',
+        wallet_address: normalized,
+        ip_address: ip,
+        severity: failCount >= 5 ? 'CRITICAL' : 'WARNING',
+        metadata: { reason: 'Nonce expired or missing', failCount },
+      });
       throw new UnauthorizedException(
         'Nonce hết hạn hoặc không tồn tại. Gọi lại /auth/nonce để lấy nonce mới.',
       );
@@ -180,6 +192,15 @@ export class AuthService {
         nonce:     storedNonce,
       });
     } catch (err) {
+      const failCount = await this.securityService.trackFailedLogin(ip);
+      if (failCount >= 5) await this.securityService.blockIp(ip, 1800);
+      await this.securityService.log({
+        event_type: 'LOGIN_FAILED',
+        wallet_address: normalized,
+        ip_address: ip,
+        severity: failCount >= 5 ? 'CRITICAL' : 'WARNING',
+        metadata: { reason: 'SIWE verify failed', error: err instanceof Error ? err.message : String(err), failCount },
+      });
       this.logger.warn(`[SIWE] Verify failed for ${normalized}: ${err}`);
       throw new UnauthorizedException(
         `Xác thực SIWE thất bại: ${err instanceof Error ? err.message : String(err)}`,
@@ -209,6 +230,13 @@ export class AuthService {
 
     // 5. Phát token pair (access 15m + refresh 30d)
     const tokens = await this.issueTokenPair(user);
+    await this.securityService.clearFailedAttempts(ip);
+    await this.securityService.log({
+      event_type: 'LOGIN_SUCCESS',
+      wallet_address: normalized,
+      ip_address: ip,
+      severity: 'INFO',
+    });
     this.logger.log(`[SIWE] Token pair issued: wallet=${normalized}`);
 
     return {

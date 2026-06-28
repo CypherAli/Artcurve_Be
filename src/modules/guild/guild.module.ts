@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
 import { Guild } from './entities/guild.entity';
 import { GuildMember } from './entities/guild-member.entity';
 import { GuildMessage } from './entities/guild-message.entity';
@@ -12,6 +13,7 @@ import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
+    ConfigModule,
     TypeOrmModule.forFeature([Guild, GuildMember, GuildMessage, GuildAnnouncement, GuildInvite, PortfolioHolding]),
     forwardRef(() => GatewayModule),
   ],
