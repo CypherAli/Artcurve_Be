@@ -7,8 +7,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository, DataSource } from 'typeorm';
 import { Artwork, ArtworkStatus, ArtworkType, CurveType } from './entities/artwork.entity';
+import { ModerationLog, ModerationAction } from './entities/moderation-log.entity';
 import { Transaction } from '../trades/entities/transaction.entity';
 import {
   CreateArtworkDto,
@@ -69,9 +71,13 @@ export class ArtworksService {
     @InjectRepository(Transaction)
     private readonly txRepo: Repository<Transaction>,
 
+    @InjectRepository(ModerationLog)
+    private readonly moderationLogRepo: Repository<ModerationLog>,
+
     private readonly dataSource:    DataSource,
     private readonly pinataService: PinataService,
     private readonly redisService:  RedisService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ─── createDraftArtwork ────────────────────────────────────────────────────
@@ -151,12 +157,82 @@ export class ArtworksService {
 
     if (flagged) {
       this.logger.warn(`Artwork ${artwork.id} flagged by auto-moderation — kept as DRAFT`);
+      await this.moderationLogRepo.save(this.moderationLogRepo.create({
+        artwork_id:         artwork.id,
+        admin_id:           null,
+        ai_confidence_score: '0.00',
+        action_taken:       ModerationAction.REJECTED,
+        reason:             'Banned keyword detected in title/description',
+      }));
       return;
     }
+
+    await this.checkAiArtworkType(artwork);
 
     artwork.status = ArtworkStatus.AI_MODERATING;
     await this.artworkRepo.save(artwork);
     this.logger.log(`Artwork ${artwork.id} → AI_MODERATING (auto)`);
+  }
+
+  // ─── checkAiArtworkType ────────────────────────────────────────────────────
+
+  /**
+   * Gọi Artcurve_AI detection service (best-effort) để so sánh với
+   * artwork_type mà creator tự khai báo. KHÔNG block pipeline nếu service
+   * lỗi/timeout — chỉ ghi log. Mismatch → MANUAL_REVIEW, không tự reject,
+   * vì detector accuracy trên AI art đời mới (Midjourney/Flux/SDXL) chưa
+   * được kiểm chứng (xem README Artcurve_AI).
+   */
+  private async checkAiArtworkType(artwork: Artwork): Promise<void> {
+    const aiServiceUrl = this.configService.get<string>('AI_SERVICE_URL');
+    if (!aiServiceUrl || !artwork.image_uri) return;
+
+    try {
+      const imageUrl = artwork.image_uri.startsWith('ipfs://')
+        ? `https://gateway.pinata.cloud/ipfs/${artwork.image_uri.replace('ipfs://', '')}`
+        : artwork.image_uri;
+
+      const imageRes = await fetch(imageUrl, { signal: AbortSignal.timeout(10_000) });
+      if (!imageRes.ok) return;
+      const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
+
+      const formData = new FormData();
+      formData.append('file', new Blob([imageBuffer]), 'artwork.jpg');
+
+      const detectRes = await fetch(`${aiServiceUrl}/detect`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!detectRes.ok) return;
+
+      const result = await detectRes.json() as {
+        label: 'AI_GENERATED' | 'ORIGINAL';
+        confidence: number;
+      };
+
+      const declaredType = artwork.artwork_type;
+      const detectedAsAi = result.label === 'AI_GENERATED';
+      const declaredAsOriginal = declaredType === ArtworkType.ORIGINAL;
+      const mismatch = detectedAsAi && declaredAsOriginal && result.confidence >= 0.85;
+
+      await this.moderationLogRepo.save(this.moderationLogRepo.create({
+        artwork_id:          artwork.id,
+        admin_id:            null,
+        ai_confidence_score: (result.confidence * 100).toFixed(2),
+        action_taken:        mismatch ? ModerationAction.MANUAL_REVIEW : ModerationAction.APPROVED,
+        reason:              mismatch
+          ? `Creator declared "${declaredType}" but AI detector predicts "${result.label}" (${(result.confidence * 100).toFixed(1)}% confidence)`
+          : `AI detector: ${result.label} (${(result.confidence * 100).toFixed(1)}% confidence), consistent with declared type "${declaredType}"`,
+      }));
+
+      if (mismatch) {
+        this.logger.warn(`Artwork ${artwork.id}: artwork_type mismatch flagged for manual review`);
+      }
+    } catch (err) {
+      // AI service unavailable/timeout — non-blocking, just log and continue
+      this.logger.warn(`AI detection skipped for artwork ${artwork.id}: ${(err as Error).message}`);
+    }
   }
 
   // ─── getArtworkById ────────────────────────────────────────────────────────
