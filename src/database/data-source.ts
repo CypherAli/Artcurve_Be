@@ -39,8 +39,9 @@ export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
   ...connectionConfig,
 
+  // Managed Postgres (Render/Supabase/Neon) dùng cert self-signed → mặc định không reject.
   ssl: isProduction
-    ? { rejectUnauthorized: (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? 'true') === 'true' }
+    ? { rejectUnauthorized: (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? 'false') === 'true' }
     : false,
 
   entities: [

@@ -1,9 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Repository, DataSource } from 'typeorm';
 import { ArtworksService } from './artworks.service';
 import { Artwork, ArtworkStatus, CurveType } from './entities/artwork.entity';
+import { ModerationLog } from './entities/moderation-log.entity';
 import { Transaction } from '../trades/entities/transaction.entity';
 import { PinataService } from './pinata.service';
 import { RedisService } from '../../shared/redis/redis.service';
@@ -69,6 +71,7 @@ describe('ArtworksService', () => {
         ArtworksService,
         { provide: getRepositoryToken(Artwork), useValue: artworkRepo },
         { provide: getRepositoryToken(Transaction), useValue: { find: jest.fn(), save: jest.fn() } },
+        { provide: getRepositoryToken(ModerationLog), useValue: { create: jest.fn(), save: jest.fn() } },
         { provide: DataSource, useValue: dataSource },
         { provide: PinataService, useValue: { pinFile: jest.fn(), pinJson: jest.fn() } },
         {
@@ -83,6 +86,10 @@ describe('ArtworksService', () => {
             cacheBumpVersion: jest.fn().mockResolvedValue(undefined),
             getLeaderboard:   jest.fn().mockResolvedValue([]),
           },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue(undefined) },
         },
       ],
     }).compile();
