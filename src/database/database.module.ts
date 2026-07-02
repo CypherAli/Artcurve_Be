@@ -42,8 +42,11 @@ import { SecurityEvent }  from '../modules/security/entities/security-event.enti
           type: 'postgres' as const,
           ...connectionConfig,
 
+          // Render/Supabase/Neon managed Postgres dùng cert self-signed → mặc định
+          // KHÔNG reject, nếu không Node báo "self-signed certificate" và app crash.
+          // Muốn siết chặt: set DB_SSL_REJECT_UNAUTHORIZED=true + cung cấp CA.
           ssl: isProduction
-            ? { rejectUnauthorized: config.get('DB_SSL_REJECT_UNAUTHORIZED', 'true') === 'true' }
+            ? { rejectUnauthorized: config.get('DB_SSL_REJECT_UNAUTHORIZED', 'false') === 'true' }
             : false,
 
           entities: [
