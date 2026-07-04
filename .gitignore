@@ -32,7 +32,8 @@ Thumbs.db
 .idea/
 
 # Claude Code session data
-.claude/
+# Track .claude/skills (agent skill library) — chỉ ignore file local
+.claude/settings.local.json
 
 # Temp / test artifacts
 coverage/
