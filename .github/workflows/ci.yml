@@ -1,3 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  ArtCurve Backend Monorepo — CI/CD
+#
+#  Monorepo gồm 5 thành phần độc lập, mỗi thành phần một job riêng:
+#    api           NestJS (src/)               — lint, type-check, test, build
+#    contracts     Solidity + Foundry          — build, test (fuzz 10k runs)
+#    curve-engine  Rust gRPC                   — build, test
+#    order-matcher Rust AMQP                   — build, test
+#    ws-hub        Go WebSocket                — vet, test, build
+#
+#  Path filter: chỉ chạy job của phần có thay đổi (đỡ tốn phút CI).
+#  workflow_dispatch: chạy tay từ tab Actions → chạy TOÀN BỘ job (regression).
+#
+#  CD: Render auto-deploy khi push main. Job `deploy` chỉ QUAN SÁT trạng thái
+#  production (continue-on-error) — Render free tier ngủ đông sau ~15 phút nên
+#  health check có thể chậm; không để nó đánh đỏ kết quả code.
+# ─────────────────────────────────────────────────────────────────────────────
 name: CI
 
 on:
@@ -5,16 +22,62 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: # chạy tay = full regression mọi thành phần
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # ── Xác định thành phần nào của monorepo có thay đổi ──────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      curve-engine: ${{ steps.filter.outputs.curve-engine }}
+      order-matcher: ${{ steps.filter.outputs.order-matcher }}
+      ws-hub: ${{ steps.filter.outputs.ws-hub }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'src/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.json'
+              - 'nest-cli.json'
+              - 'eslint.config.mjs'
+              - '.github/workflows/ci.yml'
+            contracts:
+              - 'contracts/**'
+              - '.github/workflows/ci.yml'
+            curve-engine:
+              - 'services/curve-engine/**'
+              - '.github/workflows/ci.yml'
+            order-matcher:
+              - 'services/order-matcher/**'
+              - '.github/workflows/ci.yml'
+            ws-hub:
+              - 'services/ws-hub/**'
+              - '.github/workflows/ci.yml'
+
+  # ── NestJS API ─────────────────────────────────────────────────────────────
+  api:
+    name: API (NestJS)
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -26,33 +89,141 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
-      - name: Run unit tests
+      - name: Unit tests
         run: npm test -- --ci --runInBand --forceExit
 
       - name: Build
         run: npm run build
 
-  # CD: Render tự deploy khi push main (auto-deploy bật sẵn).
-  # Job này hiển thị bước deploy trong tab Actions + đợi BE healthy.
-  deploy:
-    needs: build-and-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # ── Smart contracts (Foundry) ──────────────────────────────────────────────
+  contracts:
+    name: Contracts (Foundry)
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
     steps:
-      - name: Render auto-deploy đã được trigger bởi push này
-        run: echo "Render đang build & deploy commit ${GITHUB_SHA::7}..."
+      - uses: actions/checkout@v5
 
-      - name: Chờ BE production healthy
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      # lib/ không track trong git — cài pin đúng version đang dùng ở local
+      - name: Install libraries (pinned)
         run: |
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 60 \
+          git clone --depth 1 --branch v1.16.1 https://github.com/foundry-rs/forge-std lib/forge-std
+          git clone --depth 1 --branch v5.3.0 https://github.com/OpenZeppelin/openzeppelin-contracts lib/openzeppelin-contracts
+          git clone --depth 1 --branch v5.3.0 https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable lib/openzeppelin-contracts-upgradeable
+
+      - name: Build
+        run: forge build
+
+      - name: Test (fuzz 10k runs, seed cố định trong foundry.toml)
+        run: forge test -vv
+
+  # ── Rust: curve-engine (gRPC price engine) ────────────────────────────────
+  curve-engine:
+    name: curve-engine (Rust)
+    needs: changes
+    if: needs.changes.outputs.curve-engine == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/curve-engine
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # tonic-build compile proto lúc build → cần protoc
+      - name: Install protoc
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/curve-engine
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        run: cargo test
+
+  # ── Rust: order-matcher (AMQP matching engine) ────────────────────────────
+  order-matcher:
+    name: order-matcher (Rust)
+    needs: changes
+    if: needs.changes.outputs.order-matcher == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/order-matcher
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/order-matcher
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        run: cargo test
+
+  # ── Go: ws-hub (real-time price hub) ──────────────────────────────────────
+  ws-hub:
+    name: ws-hub (Go)
+    needs: changes
+    if: needs.changes.outputs.ws-hub == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ws-hub
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/ws-hub/go.mod
+          cache-dependency-path: services/ws-hub/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
+  # ── CD: quan sát Render deploy (không đánh đỏ run) ─────────────────────────
+  deploy:
+    name: Deploy status (Render)
+    needs: api
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.api.result == 'success'
+    runs-on: ubuntu-latest
+    continue-on-error: true # Render free tier ngủ đông/build chậm — chỉ quan sát
+    steps:
+      - name: Đánh thức + chờ BE production healthy (tối đa 15 phút)
+        run: |
+          echo "Render auto-deploy được trigger bởi commit ${GITHUB_SHA::7}."
+          # Free tier ngủ đông sau ~15 phút không traffic — request đầu để đánh thức
+          curl -s -o /dev/null -m 10 https://artcurve-be.onrender.com/api/v1/health || true
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 15 \
               https://artcurve-be.onrender.com/api/v1/health || true)
             if [ "$code" = "200" ]; then
-              echo "✅ BE production healthy (HTTP 200)"
+              echo "✅ BE production healthy (HTTP 200)" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            echo "attempt $i/30: HTTP $code — đợi 20s..."
+            echo "attempt $i/45: HTTP $code — đợi 20s..."
             sleep 20
           done
-          echo "❌ BE không healthy sau 10 phút"
+          echo "⚠️ BE chưa healthy sau 15 phút — Render free tier build/cold-start chậm. Kiểm tra dashboard Render." >> "$GITHUB_STEP_SUMMARY"
           exit 1
