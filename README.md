@@ -13,6 +13,16 @@
 
 ---
 
+## 📚 Documentation
+
+| Tài liệu | Nội dung |
+|---|---|
+| [docs/PROJECT.md](docs/PROJECT.md) | Tổng quan kiến trúc backend monorepo |
+| [docs/SETUP.md](docs/SETUP.md) | Hướng dẫn cài đặt & chạy local chi tiết |
+| [docs/DATABASE_DESIGN.md](docs/DATABASE_DESIGN.md) | Thiết kế database (ERD, bảng, quan hệ) |
+| [docs/database/schema.md](docs/database/schema.md) | Schema chi tiết từng bảng |
+| [AGENTS.md](AGENTS.md) · [CLAUDE.md](CLAUDE.md) | Hướng dẫn cho AI coding agent (phải ở root) |
+
 ## Table of Contents
 
 - [Overview](#overview)

@@ -1,7 +1,7 @@
 # AGENTS.md — artcurve-contracts
 
 Smart contracts của ArtCurve (Solidity 0.8.24 · Foundry · Base L2).
-Kiến trúc toàn hệ thống: xem `../PROJECT.md`.
+Kiến trúc toàn hệ thống: xem `../docs/PROJECT.md`.
 
 ## Lệnh
 

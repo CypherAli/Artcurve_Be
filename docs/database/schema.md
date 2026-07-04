@@ -245,5 +245,5 @@ artcurve-backend/
 │           └── rabbitmq-blockchain.consumer.ts ← RabbitMQ listener
 ├── .env.example
 ├── package.json
-└── DATABASE_DESIGN.md
+└── docs/DATABASE_DESIGN.md
 ```
