@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  ArtCurve Backend — CD (tách riêng khỏi CI)
+#
+#  Render auto-deploy từ push main (cấu hình trong render.yaml / dashboard).
+#  Workflow này chạy SAU khi CI xanh (workflow_run) — chỉ xác nhận bản deploy
+#  mới lên production thành công. Đỏ ở đây = vấn đề deploy/hạ tầng,
+#  KHÔNG ảnh hưởng kết quả CI của code.
+# ─────────────────────────────────────────────────────────────────────────────
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify-render:
+    name: Verify Render deploy
+    # Chỉ chạy khi CI xanh trên push main (hoặc chạy tay)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Đánh thức + chờ BE production healthy (tối đa 15 phút)
+        run: |
+          echo "Xác nhận bản deploy Render sau CI xanh..."
+          # Render free tier ngủ đông sau ~15 phút không traffic — request đầu để đánh thức
+          curl -s -o /dev/null -m 10 https://artcurve-be.onrender.com/api/v1/health || true
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 15 \
+              https://artcurve-be.onrender.com/api/v1/health || true)
+            if [ "$code" = "200" ]; then
+              echo "✅ BE production healthy (HTTP 200)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $i/45: HTTP $code — đợi 20s..."
+            sleep 20
+          done
+          echo "❌ BE chưa healthy sau 15 phút — kiểm tra dashboard Render (free tier build/cold-start chậm)." >> "$GITHUB_STEP_SUMMARY"
+          exit 1

@@ -1,19 +1,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  ArtCurve Backend Monorepo — CI/CD
+#  ArtCurve Backend Monorepo — CI
 #
-#  Monorepo gồm 5 thành phần độc lập, mỗi thành phần một job riêng:
-#    api           NestJS (src/)               — lint, type-check, test, build
-#    contracts     Solidity + Foundry          — build, test (fuzz 10k runs)
-#    curve-engine  Rust gRPC                   — build, test
-#    order-matcher Rust AMQP                   — build, test
-#    ws-hub        Go WebSocket                — vet, test, build
+#  CI THUẦN: build + test + sinh artifact, dừng ở đó. Không deploy, không chờ
+#  production — việc đó thuộc về cd.yml (chạy sau khi CI xanh) và monitor.yml
+#  (cron health check định kỳ).
 #
-#  Path filter: chỉ chạy job của phần có thay đổi (đỡ tốn phút CI).
-#  workflow_dispatch: chạy tay từ tab Actions → chạy TOÀN BỘ job (regression).
+#  5 thành phần độc lập, mỗi thành phần một job + một artifact:
+#    api           NestJS      → artifact: api-dist (dist/)
+#    contracts     Foundry     → artifact: contract-abis (out/ — ABI cho FE/BO)
+#    curve-engine  Rust gRPC   → artifact: binary release
+#    order-matcher Rust AMQP   → artifact: binary release
+#    ws-hub        Go          → artifact: binary
 #
-#  CD: Render auto-deploy khi push main. Job `deploy` chỉ QUAN SÁT trạng thái
-#  production (continue-on-error) — Render free tier ngủ đông sau ~15 phút nên
-#  health check có thể chậm; không để nó đánh đỏ kết quả code.
+#  Path filter: chỉ chạy job của phần có thay đổi.
+#  workflow_dispatch: chạy tay từ tab Actions → full regression mọi job.
 # ─────────────────────────────────────────────────────────────────────────────
 name: CI
 
@@ -95,6 +95,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Upload artifact — api-dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-dist
+          path: dist/
+          retention-days: 7
+
   # ── Smart contracts (Foundry) ──────────────────────────────────────────────
   contracts:
     name: Contracts (Foundry)
@@ -124,6 +131,13 @@ jobs:
       - name: Test (fuzz 10k runs, seed cố định trong foundry.toml)
         run: forge test -vv
 
+      - name: Upload artifact — contract ABIs
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-abis
+          path: contracts/out/
+          retention-days: 7
+
   # ── Rust: curve-engine (gRPC price engine) ────────────────────────────────
   curve-engine:
     name: curve-engine (Rust)
@@ -146,11 +160,18 @@ jobs:
         with:
           workspaces: services/curve-engine
 
-      - name: Build
-        run: cargo build
-
       - name: Test
         run: cargo test
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Upload artifact — binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: curve-engine-linux-x64
+          path: services/curve-engine/target/release/artcurve-curve-engine
+          retention-days: 7
 
   # ── Rust: order-matcher (AMQP matching engine) ────────────────────────────
   order-matcher:
@@ -170,11 +191,18 @@ jobs:
         with:
           workspaces: services/order-matcher
 
-      - name: Build
-        run: cargo build
-
       - name: Test
         run: cargo test
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Upload artifact — binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-matcher-linux-x64
+          path: services/order-matcher/target/release/artcurve-order-matcher
+          retention-days: 7
 
   # ── Go: ws-hub (real-time price hub) ──────────────────────────────────────
   ws-hub:
@@ -200,30 +228,11 @@ jobs:
         run: go test ./...
 
       - name: Build
-        run: go build ./...
+        run: go build -o artcurve-ws-hub .
 
-  # ── CD: quan sát Render deploy (không đánh đỏ run) ─────────────────────────
-  deploy:
-    name: Deploy status (Render)
-    needs: api
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.api.result == 'success'
-    runs-on: ubuntu-latest
-    continue-on-error: true # Render free tier ngủ đông/build chậm — chỉ quan sát
-    steps:
-      - name: Đánh thức + chờ BE production healthy (tối đa 15 phút)
-        run: |
-          echo "Render auto-deploy được trigger bởi commit ${GITHUB_SHA::7}."
-          # Free tier ngủ đông sau ~15 phút không traffic — request đầu để đánh thức
-          curl -s -o /dev/null -m 10 https://artcurve-be.onrender.com/api/v1/health || true
-          for i in $(seq 1 45); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 15 \
-              https://artcurve-be.onrender.com/api/v1/health || true)
-            if [ "$code" = "200" ]; then
-              echo "✅ BE production healthy (HTTP 200)" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            echo "attempt $i/45: HTTP $code — đợi 20s..."
-            sleep 20
-          done
-          echo "⚠️ BE chưa healthy sau 15 phút — Render free tier build/cold-start chậm. Kiểm tra dashboard Render." >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+      - name: Upload artifact — binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-hub-linux-x64
+          path: services/ws-hub/artcurve-ws-hub
+          retention-days: 7

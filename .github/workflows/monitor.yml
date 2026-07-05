@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  ArtCurve — Production Health Monitor
+#
+#  Cron 6 tiếng/lần: ping BE (Render) + FE (Vercel) production.
+#  Down → run đỏ → GitHub tự gửi email cho owner. Không liên quan CI/CD —
+#  đây là giám sát vận hành thuần túy.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Production Health Monitor
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # 6 tiếng một lần
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Ping production
+    runs-on: ubuntu-latest
+    steps:
+      - name: BE — artcurve-be.onrender.com
+        run: |
+          # Free tier ngủ đông — đánh thức rồi chờ tối đa 5 phút
+          curl -s -o /dev/null -m 10 https://artcurve-be.onrender.com/api/v1/health || true
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 15 \
+              https://artcurve-be.onrender.com/api/v1/health || true)
+            if [ "$code" = "200" ]; then
+              echo "✅ BE healthy" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $i/20: HTTP $code — đợi 15s..."
+            sleep 15
+          done
+          echo "❌ BE down (không phản hồi sau 5 phút kể cả cold start)" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: FE — artcurve-fe.vercel.app
+        if: always() # vẫn check FE kể cả khi BE down
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 30 https://artcurve-fe.vercel.app || true)
+          if [ "$code" = "200" ]; then
+            echo "✅ FE live" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ FE trả HTTP $code" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
