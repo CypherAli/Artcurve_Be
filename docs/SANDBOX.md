@@ -83,6 +83,34 @@ Reset chain sạch: tắt cửa sổ Anvil → chạy lại `sandbox.ps1`.
 - Mirror loại trừ `contracts/.env` để forge không vô tình dùng PRIVATE_KEY thật;
   key deploy sandbox là key Anvil #0 công khai — không bao giờ dùng ngoài local.
 
+## Công cụ đi kèm
+
+### `contracts/chaos.ps1` — thử phá hệ thống (adversarial testing)
+
+Ném input độc hại vào contract trên sandbox để kiểm tra hệ thống tự vệ đúng không.
+Mỗi kịch bản có kỳ vọng rõ: `[DEFEND]` input xấu **phải** bị revert (không thì =
+lỗ hổng), `[WORK]` input hợp lệ **phải** chạy. Chạy sau `sandbox.ps1`:
+
+```powershell
+cd contracts
+.\chaos.ps1
+```
+
+Bao phủ 12 kịch bản: createArtwork (CID rỗng, targetCap dưới ngưỡng/vượt trần, phí
+quá cao), buyShares (mua 0, slippage, vượt targetCap, deadline hết hạn), sellShares
+(bán share không sở hữu, bán 0). Một dòng `[FAIL]` ở `[DEFEND]` = tìm ra chỗ contract
+không chặn được tấn công.
+
+### `doctor.ps1` — chẩn đoán & khắc phục môi trường
+
+Ở root `Artcurve_Be/`. Quét toàn bộ điều kiện chạy dự án local (toolchain, node_modules,
+file .env, đồng bộ CHAIN_ID FE/BE, sandbox, cổng dịch vụ) và in cách sửa từng mục:
+
+```powershell
+.\doctor.ps1          # chỉ chẩn đoán
+.\doctor.ps1 -Fix     # tự khắc phục mục an toàn (tạo .env, npm install...)
+```
+
 ## Lớp 3 — Base Sepolia (testnet công khai)
 
 Contracts đã deploy (địa chỉ trong FE `contracts/index.ts` key `baseSepolia`).
