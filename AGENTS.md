@@ -15,6 +15,7 @@ npm run build
 
 # Trong monorepo:
 cd contracts && forge test                      # smart contracts (Foundry)
+cd contracts && .\sandbox.ps1                   # Anvil sandbox local — xem docs/SANDBOX.md
 cd services/curve-engine && cargo run           # gRPC :50051
 cd services/order-matcher && cargo run          # AMQP consumer
 cd services/ws-hub && go run .                  # WebSocket hub
