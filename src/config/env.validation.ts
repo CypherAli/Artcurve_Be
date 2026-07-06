@@ -120,6 +120,8 @@ export const envValidationSchema = Joi.object({
   // ── [11] AI Moderation ─────────────────────────────────────────────────────
   // Optional — nếu không set thì artwork tự động approved (dev mode)
   OPENAI_API_KEY:       Joi.string().allow('').default(''),
+  // Artcurve_AI service (detect / embed / tag / similarity) — discovery layer
+  AI_SERVICE_URL:       Joi.string().uri().default('http://localhost:8000'),
   GOOGLE_VISION_API_KEY: Joi.string().allow('').default(''),
   NSFW_SCORE_THRESHOLD: Joi.number().min(0).max(1).default(0.7),
 

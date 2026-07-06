@@ -19,6 +19,7 @@ import {
 } from './dto/create-artwork.dto';
 import { PinataService }  from './pinata.service';
 import { RedisService }   from '../../shared/redis/redis.service';
+import { DiscoveryService } from '../discovery/discovery.service';
 import { REDIS_KEYS, TTL } from '../../shared/redis/redis.constants';
 import { CursorPage, buildCursorPage, decodeCursor } from '../../common/pagination/cursor.util';
 
@@ -78,6 +79,7 @@ export class ArtworksService {
     private readonly pinataService: PinataService,
     private readonly redisService:  RedisService,
     private readonly configService: ConfigService,
+    private readonly discovery:     DiscoveryService,
   ) {}
 
   // ─── createDraftArtwork ────────────────────────────────────────────────────
@@ -143,6 +145,12 @@ export class ArtworksService {
       await this.autoModerate(saved);
     } catch (err) {
       this.logger.error(`Auto-moderation failed for ${saved.id}: ${(err as Error).message}`);
+    }
+
+    // Fingerprint (embedding + phash + auto-tag) — nền cho dup-guard/recommend.
+    // Fire-and-forget: best-effort, không chặn tạo artwork nếu AI service down.
+    if (saved.image_uri) {
+      void this.discovery.fingerprint(saved.id, saved.image_uri);
     }
 
     return saved;

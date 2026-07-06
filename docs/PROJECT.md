@@ -47,7 +47,7 @@ Mọi client (FE, back-office, price-agent) đều đi qua API này.
 - Rate-limit toàn cục (Throttler 120 req/phút), guard per-endpoint.
 - Circuit breaker cho external call; correlation-id middleware cho tracing.
 - Env validate bằng Joi schema lúc boot — thiếu biến là fail-fast.
-- **15 test suite / 124 test — pass 100%.**
+- **15 test suite / 134 test — pass 100%.**
 
 ## 6. Trạng thái
 

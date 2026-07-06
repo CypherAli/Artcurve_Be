@@ -177,6 +177,30 @@ export class Artwork {
   @Column({ type: 'decimal', precision: 18, scale: 8, default: '0' })
   target_cap: string;
 
+  // ── Discovery: vân tay + embedding + auto-tag ─────────────────────────────
+  // Set bởi DiscoveryService (gọi Artcurve_AI). jsonb thay pgvector — xem migration.
+
+  /** Perceptual hash (dup-guard bản sao gần-hệt) */
+  @Index('idx_artworks_phash')
+  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
+  phash: string | null;
+
+  /** CLIP embedding (mảng số) — cosine ở tầng app cho similar/recommend */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  embedding: number[] | null;
+
+  /** Auto-tag phong cách: [{ tag, score }] */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  style_tags: Array<{ tag: string; score: number | null }> | null;
+
+  /** Cảm xúc chủ đạo (top-1) */
+  @Column({ type: 'varchar', length: 30, nullable: true, default: null })
+  mood: string | null;
+
+  /** Bảng màu chủ đạo: [{ hex, name, ratio }] */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  palette: Array<{ hex: string; name: string; ratio: number }> | null;
+
   // ── Engagement ────────────────────────────────────────────────────────────
 
   @Column({ type: 'integer', default: 0 })

@@ -8,11 +8,13 @@ import { ArtworksService } from './artworks.service';
 import { ArtworksController } from './artworks.controller';
 import { PinataService } from './pinata.service';
 import { ArtworkRepository } from './repositories/artwork.repository';
+import { DiscoveryModule } from '../discovery/discovery.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Artwork, Transaction, ModerationLog]),
     ConfigModule,   // inject ConfigService vào PinataService + AI_SERVICE_URL
+    DiscoveryModule, // fingerprint (embedding + tag) khi tạo artwork
   ],
   controllers: [ArtworksController],
   providers: [ArtworksService, PinataService, ArtworkRepository],

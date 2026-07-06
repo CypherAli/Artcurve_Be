@@ -37,6 +37,7 @@ import { SocialModule }             from './modules/social/social.module';
 
 // ── Moderation ────────────────────────────────────────────────────────────────
 import { ModerationModule }         from './modules/moderation/moderation.module';
+import { DiscoveryModule }          from './modules/discovery/discovery.module';
 
 // ── Health ────────────────────────────────────────────────────────────────────
 import { HealthModule }             from './modules/health/health.module';
@@ -125,9 +126,10 @@ import { BlockchainModule }         from './modules/blockchain/blockchain.module
     // ⑦ Notifications (@Global — trước Social để SocialModule có thể inject)
     NotificationsModule,
 
-    // ⑧ Social + Moderation
+    // ⑧ Social + Moderation + Discovery
     SocialModule,
     ModerationModule,
+    DiscoveryModule,
 
     // ⑧ Health checks + metrics
     HealthModule,

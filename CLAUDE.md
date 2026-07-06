@@ -6,7 +6,7 @@ Backend API chính của ArtCurve (NestJS 10 · TypeScript · PostgreSQL · Redi
 
 ```bash
 npm run start:dev     # dev server :3001 — prefix /api/v1, Swagger UI: /api/docs
-npm test              # jest — 15 suite / 124 test, phải xanh trước khi merge
+npm test              # jest — 15 suite / 134 test, phải xanh trước khi merge
 npm run build         # tsc build
 npx typeorm migration:run -d dist/database/data-source.js   # chạy migration thủ công
 npx ts-node src/database/seeds/seed.ts                      # bơm data giả để test
@@ -21,11 +21,11 @@ src/
 ├── database/
 │   ├── data-source.ts     # DataSource cho TypeORM CLI (migration/seed)
 │   ├── database.module.ts # TypeORM runtime config (forRootAsync)
-│   ├── migrations/        # 24 migration — KHÔNG sửa migration cũ, tạo migration mới
+│   ├── migrations/        # 25 migration — KHÔNG sửa migration cũ, tạo migration mới
 │   └── seeds/seed.ts      # data giả
 ├── shared/                # @Global: redis, clickhouse, curve-engine (gRPC), onchain-quote
 ├── common/                # interceptors, pagination (cursor), resilience (circuit breaker)
-└── modules/               # 17 feature module
+└── modules/               # 18 feature module
     ├── auth/              # SIWE (EIP-4361) + OAuth + JWT
     ├── artworks/          # CRUD + IPFS (Pinata) + state machine DRAFT→GRADUATED
     ├── trades/            # OHLCV (ClickHouse), lịch sử, leaderboard

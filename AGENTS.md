@@ -10,7 +10,7 @@ convention chi tiết + **bảng chỉ đường skill**: xem `CLAUDE.md`.
 npm install
 cp .env.example .env        # điền DATABASE_URL, REDIS_URL, JWT_SECRET, PINATA_*
 npm run start:dev           # :3001 — prefix /api/v1, Swagger UI: /api/docs (cần PG + Redis chạy sẵn)
-npm test                    # PHẢI 124/124 pass trước khi merge
+npm test                    # PHẢI 134/134 pass trước khi merge
 npm run build
 
 # Trong monorepo:

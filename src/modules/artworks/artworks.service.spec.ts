@@ -9,6 +9,7 @@ import { ModerationLog } from './entities/moderation-log.entity';
 import { Transaction } from '../trades/entities/transaction.entity';
 import { PinataService } from './pinata.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { DiscoveryService } from '../discovery/discovery.service';
 
 describe('ArtworksService', () => {
   let service: ArtworksService;
@@ -90,6 +91,10 @@ describe('ArtworksService', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue(undefined) },
+        },
+        {
+          provide: DiscoveryService,
+          useValue: { fingerprint: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
