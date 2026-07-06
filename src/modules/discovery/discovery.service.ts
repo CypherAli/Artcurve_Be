@@ -84,8 +84,25 @@ export class DiscoveryService {
     }
   }
 
-  /** Dup-guard: tìm tranh đã có trên sàn giống bức mới (cosine cao hoặc hamming thấp). */
-  async findDuplicates(embedding: number[] | null, phash: string | null): Promise<DuplicateHit[]> {
+  /** Dup-guard cho 1 artwork đã fingerprint: so vân tay của nó với phần còn lại. */
+  async findDuplicatesOf(artworkId: string): Promise<DuplicateHit[]> {
+    const target = await this.artworkRepo.findOne({
+      where: { id: artworkId },
+      select: ['id', 'embedding', 'phash'],
+    });
+    if (!target) throw new NotFoundException('Artwork không tồn tại');
+    return this.findDuplicates(target.embedding, target.phash, artworkId);
+  }
+
+  /**
+   * Dup-guard: tìm tranh đã có trên sàn giống bức cho trước (cosine cao HOẶC hamming thấp).
+   * excludeId để loại chính nó khi so cho một artwork đã lưu.
+   */
+  async findDuplicates(
+    embedding: number[] | null,
+    phash: string | null,
+    excludeId?: string,
+  ): Promise<DuplicateHit[]> {
     if (!embedding && !phash) return [];
     const rows = await this.artworkRepo.find({
       select: ['id', 'title', 'embedding', 'phash'],
@@ -94,6 +111,7 @@ export class DiscoveryService {
 
     const hits: DuplicateHit[] = [];
     for (const r of rows) {
+      if (r.id === excludeId) continue;
       const cos = embedding && r.embedding ? cosineSimilarity(embedding, r.embedding) : 0;
       const ham = phash && r.phash ? hammingHex(phash, r.phash) : Number.MAX_SAFE_INTEGER;
       if (cos >= this.DUP_COSINE || ham <= this.DUP_HAMMING) {
