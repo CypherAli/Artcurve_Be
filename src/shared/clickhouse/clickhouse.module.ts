@@ -13,7 +13,11 @@ import { CLICKHOUSE_CLIENT } from './clickhouse.constants';
       inject: [ConfigService],
       useFactory: (config: ConfigService): ClickHouseClient => {
         return createClient({
-          url:      `http://${config.get('CLICKHOUSE_HOST', 'localhost')}:${config.get('CLICKHOUSE_PORT', 8123)}`,
+          // CLICKHOUSE_HOST trong .env đã LÀ URL đầy đủ (vd http://localhost:8123
+          // hoặc https://xxx.clickhouse.cloud:8443) — KHÔNG được ghép thêm
+          // protocol/port thủ công, nếu không ra URL hỏng dạng
+          // "http://http://localhost:8123:8123" khiến mọi query OHLCV lỗi 500.
+          url:      config.get('CLICKHOUSE_HOST', 'http://localhost:8123'),
           username: config.get('CLICKHOUSE_USER', 'artcurve'),
           password: config.get('CLICKHOUSE_PASSWORD', 'artcurve_ch_pass'),
           database: config.get('CLICKHOUSE_DB', 'artcurve_analytics'),
