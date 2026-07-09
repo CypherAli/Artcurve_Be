@@ -279,7 +279,18 @@ export class ArtworksController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits:  { fileSize: 20 * 1024 * 1024 },   // 20MB
+      // Giới hạn chặt cho multipart parsing — multer <2.2.0 có CVE DoS qua
+      // nhiều field/field-name lồng nhau (GHSA-72gw-mp4g-v24j, GHSA-5528-5vmv-3xc2).
+      // Bản vá thật cần NestJS 11 (breaking change, chưa nâng cấp) — các giới hạn
+      // dưới đây là biện pháp phòng thủ giảm bề mặt tấn công trong lúc chờ nâng cấp.
+      limits: {
+        fileSize:     20 * 1024 * 1024,  // 20MB — 1 file
+        files:        1,                 // chỉ 1 file/request
+        fields:       5,                 // chỉ có title + description
+        fieldNameSize: 100,
+        fieldSize:    5000,              // đủ cho description dài
+        parts:        10,
+      },
       fileFilter: (_req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
         if (allowed.includes(file.mimetype)) {
