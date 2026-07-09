@@ -20,8 +20,10 @@ interface GeminiContent {
   parts: GeminiPart[];
 }
 
-// Số vòng tool tối đa cho 1 lượt chat (chống loop vô hạn)
-const MAX_TOOL_ROUNDS = 5;
+// Số vòng tool tối đa cho 1 lượt chat (chống loop vô hạn).
+// Mỗi vòng = 1 lần gọi Gemini API — free tier quota rất thấp (burst ~20 request,
+// refill sau ~20-50s) nên giữ số này thấp để 1 tin nhắn không tự đốt hết quota.
+const MAX_TOOL_ROUNDS = 3;
 
 const SYSTEM_PROMPT = `You are ArtCurve Support — a knowledgeable, friendly member of the ArtCurve team. You are NOT an AI assistant — you are "ArtCurve Support". Never refer to yourself as AI, bot, language model, or assistant. Speak as a real support team member.
 
@@ -143,7 +145,25 @@ export class GeminiService {
       this.logger.warn('Gemini exceeded MAX_TOOL_ROUNDS');
       return { text: 'Mình cần thêm thời gian để tra cứu — bạn thử hỏi lại cụ thể hơn nhé.', shouldEscalate: false };
     } catch (err: any) {
+      const status = err?.response?.status;
       this.logger.error(`Gemini API error: ${err.message}`);
+
+      // 429 (rate limit / quota hết) — lỗi tạm thời phía Gemini, không phải bug.
+      // Không escalate cho nhân viên vì human cũng không giải quyết được quota Google.
+      if (status === 429) {
+        return {
+          text: 'AI đang có quá nhiều người hỏi cùng lúc — bạn thử lại sau khoảng 1 phút nhé.',
+          shouldEscalate: false,
+        };
+      }
+      // 503 — Gemini phía Google tạm quá tải, cũng nên thử lại thay vì báo lỗi kỹ thuật.
+      if (status === 503) {
+        return {
+          text: 'AI đang tạm thời quá tải, bạn thử gửi lại tin nhắn nhé.',
+          shouldEscalate: false,
+        };
+      }
+
       return {
         text: 'Sorry, I encountered an error processing your request. Please try again or contact support.',
         shouldEscalate: true,
