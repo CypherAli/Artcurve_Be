@@ -26,8 +26,10 @@ export class LiveController {
 
   // ── POST /live/create ─────────────────────────────────────────────────────
   // Host gọi endpoint này để tạo room và nhận host token
+  // 10/giờ — đủ thoải mái để tạo/chỉnh sửa/thử lại stream (kể cả sau lỗi mạng),
+  // vẫn chặn được spam thật (tạo room hàng loạt để phá LiveKit resource).
   @Post('create')
-  @Throttle({ default: { limit: 3, ttl: 3600000 } })
+  @Throttle({ default: { limit: 10, ttl: 3600000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Tạo stream mới (host)' })
   async createStream(

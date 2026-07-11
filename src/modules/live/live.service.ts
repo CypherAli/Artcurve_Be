@@ -54,6 +54,22 @@ export class LiveService {
     return new RoomServiceClient(this.serverUrl, this.apiKey, this.apiSecret);
   }
 
+  /**
+   * Kiểm tra room có THẬT SỰ còn tồn tại trên LiveKit Cloud không (nguồn sự thật
+   * duy nhất — DB chỉ là cache). listParticipants ném lỗi nếu room không tồn tại
+   * → coi là đã chết. Nếu LiveKit chưa cấu hình (serverUrl rỗng, dev offline),
+   * coi như không xác minh được → giữ nguyên hành vi cũ (chặn) để an toàn.
+   */
+  private async isRoomActuallyLive(roomName: string): Promise<boolean> {
+    if (!this.serverUrl) return true;
+    try {
+      await this.roomService().listParticipants(roomName);
+      return true; // room tồn tại (có thể 0 người, nhưng chưa hẳn đã chết — để timeout tự nhiên xử lý)
+    } catch {
+      return false; // room không tồn tại trên LiveKit — chắc chắn đã chết
+    }
+  }
+
   /** Tạo JWT token cho một participant trong room */
   private async buildToken(
     roomName:   string,
@@ -85,12 +101,24 @@ export class LiveService {
     hostName: string,
     dto:      CreateStreamDto,
   ) {
-    // Kiểm tra host đã có stream đang live chưa
+    // Kiểm tra host đã có stream đang live chưa.
+    // Nếu có, xác minh THẬT trên LiveKit trước khi chặn — nếu user đóng tab/crash
+    // browser thay vì bấm "End Stream", DB vẫn ghi is_live=true mãi mãi (webhook
+    // dọn tự động không hoạt động ở local vì LiveKit Cloud không gọi được vào
+    // localhost). Không xác minh thì user bị khóa vĩnh viễn không tạo được stream mới.
     const activeStream = await this.liveRepo.findOne({
       where: { host_id: hostId, is_live: true },
     });
     if (activeStream) {
-      throw new ConflictException('You already have an active stream');
+      const stillLive = await this.isRoomActuallyLive(activeStream.room_name);
+      if (stillLive) {
+        throw new ConflictException('You already have an active stream');
+      }
+      // Phòng đã chết thật (0 người hoặc không còn tồn tại) — tự dọn rồi cho tạo mới
+      this.logger.warn(`Auto-cleaning stale stream: ${activeStream.room_name}`);
+      activeStream.is_live  = false;
+      activeStream.ended_at = new Date();
+      await this.liveRepo.save(activeStream);
     }
 
     // randomUUID đảm bảo không trùng room name kể cả khi cùng host start 2 stream cùng lúc
